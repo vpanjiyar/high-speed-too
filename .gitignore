@@ -1,0 +1,28 @@
+# Generated data
+data/
+
+# Godot build
+.godot/
+*.import
+export_presets.cfg
+
+# .NET build
+bin/
+obj/
+*.user
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vs/
+*.suo
+*.sln.docstates

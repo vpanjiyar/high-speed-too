@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="16" fill="#1a1a2e"/>
+  <g transform="translate(64,64)">
+    <!-- Rail track lines -->
+    <line x1="-40" y1="20" x2="40" y2="20" stroke="#e94560" stroke-width="4" stroke-linecap="round"/>
+    <line x1="-40" y1="10" x2="40" y2="10" stroke="#0f3460" stroke-width="4" stroke-linecap="round"/>
+    <line x1="-40" y1="0" x2="40" y2="0" stroke="#16213e" stroke-width="4" stroke-linecap="round"/>
+    <!-- Stops -->
+    <circle cx="-25" cy="20" r="5" fill="#e94560" stroke="white" stroke-width="2"/>
+    <circle cx="0" cy="10" r="5" fill="#0f3460" stroke="white" stroke-width="2"/>
+    <circle cx="25" cy="0" r="5" fill="#16213e" stroke="white" stroke-width="2"/>
+    <!-- HST text -->
+    <text x="0" y="-25" text-anchor="middle" font-family="Arial, sans-serif" font-weight="bold" font-size="24" fill="white">HST</text>
+  </g>
+</svg>
