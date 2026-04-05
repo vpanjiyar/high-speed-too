@@ -1,9 +1,0 @@
-{
-  "executionEnvironments": [
-    {
-      "root": "tools",
-      "reportMissingImports": "none",
-      "reportMissingModuleSource": "none"
-    }
-  ]
-}
