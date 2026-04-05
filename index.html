@@ -90,6 +90,53 @@
         Run <code>npm run download-tiles</code> then reload.
       </div>
 
+      <!-- ── Network builder toolbar ──────────────────────────────────────── -->
+      <div id="network-toolbar">
+        <button class="tool-btn active" id="tool-select" title="Select">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M3 1l10 6.5L8.5 9l-2 5.5L3 1z"/></svg>
+        </button>
+        <button class="tool-btn" id="tool-station" title="Place Station">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>
+        </button>
+        <button class="tool-btn" id="tool-line" title="Draw Line">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 13L8 5l5 8" stroke-linejoin="round"/><circle cx="3" cy="13" r="1.5" fill="currentColor"/><circle cx="8" cy="5" r="1.5" fill="currentColor"/><circle cx="13" cy="13" r="1.5" fill="currentColor"/></svg>
+        </button>
+        <div class="tool-separator"></div>
+        <button class="tool-btn tool-btn--danger" id="tool-clear" title="Clear All">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+        </button>
+      </div>
+
+      <!-- ── Line editor panel (shown in 'line' mode) ─────────────────────── -->
+      <div id="line-panel" class="panel hidden">
+        <div class="panel-header">
+          <span class="panel-title">Lines</span>
+          <button id="line-panel-close" class="panel-close" title="Close">&times;</button>
+        </div>
+
+        <!-- New line form -->
+        <div id="new-line-form">
+          <input id="new-line-name" type="text" placeholder="Line name…" maxlength="40" autocomplete="off" />
+          <div id="new-line-colors"></div>
+          <button id="new-line-add" class="btn-primary">Add Line</button>
+        </div>
+
+        <!-- Line list -->
+        <div id="line-list"></div>
+      </div>
+
+      <!-- ── Station info panel (shown when station selected) ─────────────── -->
+      <div id="station-panel" class="panel hidden">
+        <div class="panel-header">
+          <span class="panel-title">Station</span>
+          <button id="station-panel-close" class="panel-close" title="Close">&times;</button>
+        </div>
+        <div id="station-edit">
+          <input id="station-name-input" type="text" placeholder="Station name…" maxlength="60" autocomplete="off" />
+          <button id="station-delete" class="btn-danger">Delete</button>
+        </div>
+      </div>
+
       <!-- Zoom level hotlinks — bottom-right, sits above the scale bar -->
       <div id="zoom-links">
         <button class="zoom-link" data-zoom="5.5"  data-label="UK">UK</button>

@@ -5,6 +5,9 @@ import { Protocol } from 'pmtiles';
 import { mapStyle } from './map-style';
 import { CensusOverlay, LEGEND_CONFIGS } from './census-overlay';
 import type { CensusMetric, CensusOverlayState } from './census-overlay';
+import { NetworkEditor } from './network-editor';
+import type { EditorState } from './network-editor';
+import { LINE_COLORS } from './network';
 
 // Register the PMTiles custom protocol so MapLibre can load .pmtiles files
 // via HTTP range-requests from a single static file.
@@ -156,6 +159,174 @@ map.on('load', () => {
       overlay.setMetric(radio.value as CensusMetric);
     });
   });
+
+  // ── Network editor ──────────────────────────────────────────────────────
+  //
+  // updateNetworkUI / renderLineList are declared before the editor so they
+  // can be passed as callbacks, but they use `editor` which is assigned
+  // immediately after construction. The constructor no longer calls _emit(),
+  // so these functions are never invoked before `editor` is assigned.
+
+  // eslint-disable-next-line prefer-const
+  let editor!: NetworkEditor;
+
+  function updateNetworkUI(state: EditorState): void {
+    // Update toolbar active states
+    document.querySelectorAll<HTMLButtonElement>('.tool-btn').forEach((btn) => {
+      const mode = btn.id.replace('tool-', '');
+      btn.classList.toggle('active', mode === state.mode);
+    });
+
+    // Show/hide panels
+    const linePanel = document.getElementById('line-panel')!;
+    const stationPanel = document.getElementById('station-panel')!;
+
+    if (state.mode === 'line') {
+      linePanel.classList.remove('hidden');
+      stationPanel.classList.add('hidden');
+    } else if (state.selectedStationId) {
+      stationPanel.classList.remove('hidden');
+      linePanel.classList.add('hidden');
+
+      const station = editor.network.getStation(state.selectedStationId);
+      if (station) {
+        (document.getElementById('station-name-input') as HTMLInputElement).value = station.name;
+      }
+    } else {
+      stationPanel.classList.add('hidden');
+    }
+
+    renderLineList(state);
+  }
+
+  function renderLineList(state: EditorState): void {
+    const container = document.getElementById('line-list')!;
+    container.innerHTML = '';
+
+    for (const line of editor.network.lines) {
+      const item = document.createElement('div');
+      item.className = 'line-item' + (line.id === state.activeLineId ? ' active' : '');
+
+      const dot = document.createElement('div');
+      dot.className = 'line-item-color';
+      dot.style.background = line.color;
+
+      const lineName = document.createElement('span');
+      lineName.className = 'line-item-name';
+      lineName.textContent = line.name;
+
+      const count = document.createElement('span');
+      count.className = 'line-item-stations';
+      count.textContent = `${line.stationIds.length} stn`;
+
+      const del = document.createElement('button');
+      del.className = 'line-item-delete';
+      del.title = 'Delete line';
+      del.textContent = '×';
+      del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        editor.deleteLine(line.id);
+      });
+
+      item.appendChild(dot);
+      item.appendChild(lineName);
+      item.appendChild(count);
+      item.appendChild(del);
+
+      item.addEventListener('click', () => {
+        editor.setActiveLine(line.id);
+      });
+
+      container.appendChild(item);
+    }
+  }
+
+  editor = new NetworkEditor(map, updateNetworkUI);
+  _w['__networkEditor'] = editor;
+
+  // Toolbar mode buttons
+  const toolBtns = {
+    select:  document.getElementById('tool-select')!,
+    station: document.getElementById('tool-station')!,
+    line:    document.getElementById('tool-line')!,
+  };
+
+  Object.entries(toolBtns).forEach(([mode, btn]) => {
+    btn.addEventListener('click', () => {
+      if (mode === 'line') {
+        editor.setMode('line');
+        document.getElementById('line-panel')!.classList.remove('hidden');
+        document.getElementById('station-panel')!.classList.add('hidden');
+      } else {
+        editor.setMode(mode as 'select' | 'station');
+        document.getElementById('line-panel')!.classList.add('hidden');
+      }
+    });
+  });
+
+  // Clear button
+  document.getElementById('tool-clear')!.addEventListener('click', () => {
+    if (editor.network.stations.length === 0 && editor.network.lines.length === 0) return;
+    if (confirm('Clear the entire network?')) {
+      editor.clearNetwork();
+    }
+  });
+
+  // Line panel close
+  document.getElementById('line-panel-close')!.addEventListener('click', () => {
+    document.getElementById('line-panel')!.classList.add('hidden');
+    editor.setMode('select');
+  });
+
+  // Station panel close
+  document.getElementById('station-panel-close')!.addEventListener('click', () => {
+    document.getElementById('station-panel')!.classList.add('hidden');
+    editor.setMode('select');
+  });
+
+  // Color swatches for new line
+  const colorContainer = document.getElementById('new-line-colors')!;
+  let selectedColor = editor.network.nextColor();
+
+  function renderColorSwatches(): void {
+    colorContainer.innerHTML = '';
+    LINE_COLORS.forEach((c) => {
+      const swatch = document.createElement('div');
+      swatch.className = 'color-swatch' + (c === selectedColor ? ' selected' : '');
+      swatch.style.background = c;
+      swatch.addEventListener('click', () => {
+        selectedColor = c;
+        renderColorSwatches();
+      });
+      colorContainer.appendChild(swatch);
+    });
+  }
+  renderColorSwatches();
+
+  // Add line button
+  document.getElementById('new-line-add')!.addEventListener('click', () => {
+    const nameInput = document.getElementById('new-line-name') as HTMLInputElement;
+    const name = nameInput.value.trim() || `Line ${editor.network.lines.length + 1}`;
+    editor.createLine(name, selectedColor);
+    nameInput.value = '';
+    selectedColor = editor.network.nextColor();
+    renderColorSwatches();
+  });
+
+  // Station name input
+  const stationNameInput = document.getElementById('station-name-input') as HTMLInputElement;
+  stationNameInput.addEventListener('change', () => {
+    editor.renameSelectedStation(stationNameInput.value.trim());
+  });
+
+  // Station delete
+  document.getElementById('station-delete')!.addEventListener('click', () => {
+    editor.deleteSelectedStation();
+    document.getElementById('station-panel')!.classList.add('hidden');
+  });
+
+  // Trigger initial UI sync now that editor is fully constructed and assigned
+  editor.syncUI();
 });
 
 function updateCensusUI(state: CensusOverlayState): void {
