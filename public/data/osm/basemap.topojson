@@ -1,0 +1,34 @@
+{
+  "type": "Topology",
+  "objects": {
+    "rail": {
+      "type": "GeometryCollection",
+      "geometries": [
+        {
+          "type": "LineString",
+          "properties": { "type": "rail", "name": "WCML" },
+          "arcs": [0]
+        },
+        {
+          "type": "LineString",
+          "properties": { "type": "rail", "name": "ECML" },
+          "arcs": [1]
+        },
+        {
+          "type": "LineString",
+          "properties": { "type": "rail", "name": "GWR" },
+          "arcs": [2]
+        }
+      ]
+    }
+  },
+  "arcs": [
+    [[-1337, 51528], [-480, 210], [-560, 420], [-900, 960], [-1400, 1500], [-2200, 2300]],
+    [[-1238, 51530], [300, 250], [600, 800], [1200, 1200], [1800, 2200], [2000, 3000]],
+    [[-1755, 51515], [-600, -30], [-1200, -60], [-2581, -65]]
+  ],
+  "transform": {
+    "scale": [0.001, 0.001],
+    "translate": [0, 0]
+  }
+}

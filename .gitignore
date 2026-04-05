@@ -1,28 +1,24 @@
-# Generated data
-data/
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# Godot build
-.godot/
-*.import
-export_presets.cfg
+node_modules
+dist
+dist-ssr
+*.local
 
-# .NET build
-bin/
-obj/
-*.user
-
-# Python
-__pycache__/
-*.pyc
-.venv/
-venv/
-
-# OS
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
 .DS_Store
-Thumbs.db
-desktop.ini
-
-# IDE
-.vs/
 *.suo
-*.sln.docstates
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

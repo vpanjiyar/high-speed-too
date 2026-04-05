@@ -1,10 +1,5 @@
-# High Speed Too — Data Pipeline
-# Python dependencies for processing UK census, geography, and transport data.
-
-geopandas>=0.14.0
+requests>=2.28
+pandas>=2.0
+geopandas>=0.14
+topojson>=1.8
 shapely>=2.0
-pandas>=2.1
-requests>=2.31
-msgpack>=1.0
-tqdm>=4.66
-pyproj>=3.6

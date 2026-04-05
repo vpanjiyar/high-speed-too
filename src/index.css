@@ -1,0 +1,229 @@
+:root {
+  --toolbar-width: 200px;
+  --hud-height: 48px;
+  --bg: #1a1a2e;
+  --panel-bg: #16213e;
+  --text: #e0e0e0;
+  --accent: #4a90d9;
+  --border: #2a3a5e;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* Canvas fills the entire viewport behind UI */
+.canvas-container {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+.canvas-container canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* ===== Toolbar (left side) ===== */
+.toolbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: var(--hud-height);
+  width: var(--toolbar-width);
+  background: var(--panel-bg);
+  border-right: 1px solid var(--border);
+  z-index: 10;
+  overflow-y: auto;
+  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.toolbar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.toolbar-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #8899bb;
+  margin-bottom: 4px;
+}
+
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--text);
+  border: 2px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.toolbar-btn:hover {
+  background: rgba(74, 144, 217, 0.15);
+}
+
+.toolbar-btn.active {
+  background: rgba(74, 144, 217, 0.25);
+  border-color: var(--accent);
+}
+
+/* Mode-specific active border colors */
+.toolbar-btn[data-mode="HEAVY_RAIL"][data-active="true"] { border-color: #E32017; }
+.toolbar-btn[data-mode="METRO"][data-active="true"]      { border-color: #0019A8; }
+.toolbar-btn[data-mode="TRAM"][data-active="true"]       { border-color: #00782A; }
+.toolbar-btn[data-mode="BUS"][data-active="true"]        { border-color: #F18F2B; }
+}
+
+.toolbar-icon {
+  font-size: 16px;
+}
+
+.finish-btn {
+  background: rgba(40, 167, 69, 0.2) !important;
+  border-color: #28a745 !important;
+}
+.finish-btn:hover {
+  background: rgba(40, 167, 69, 0.35) !important;
+}
+
+/* ===== HUD (bottom bar) ===== */
+.hud {
+  position: absolute;
+  bottom: 0;
+  left: var(--toolbar-width);
+  right: 0;
+  height: var(--hud-height);
+  background: var(--panel-bg);
+  border-top: 1px solid var(--border);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 20px;
+}
+
+.hud-time {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 60px;
+}
+
+.hud-controls {
+  display: flex;
+  gap: 4px;
+}
+
+.hud-speed-btn {
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.hud-speed-btn:hover {
+  background: rgba(74, 144, 217, 0.2);
+}
+.hud-speed-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.hud-stats {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.hud-stat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ===== Analytics Panel (right side) ===== */
+.analytics-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: var(--hud-height);
+  width: 340px;
+  background: var(--panel-bg);
+  border-left: 1px solid var(--border);
+  z-index: 10;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.analytics-panel h3 {
+  font-size: 16px;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.analytics-section {
+  margin-bottom: 20px;
+}
+
+.analytics-section h4 {
+  font-size: 13px;
+  color: #8899bb;
+  margin-bottom: 8px;
+}
+
+.analytics-empty {
+  font-size: 12px;
+  color: #667;
+  font-style: italic;
+}
+
+.analytics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.analytics-table th {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  color: #8899bb;
+  font-weight: 500;
+}
+
+.analytics-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(42, 58, 94, 0.5);
+}
