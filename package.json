@@ -1,0 +1,30 @@
+{
+  "name": "high-speed-too",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "download-tiles": "node scripts/download-tiles.mjs",
+    "uk-mask": "node scripts/generate-uk-mask.mjs",
+    "naptan": "python tools/naptan_processor.py",
+    "rail-lines": "python tools/rail_lines_processor.py",
+    "diagnostic": "node scripts/diagnostic.mjs",
+    "census": "python tools/census_processor.py",
+    "geography": "python tools/geography_processor.py --merge-census",
+    "census-merge": "npm run census && npm run geography"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^25.5.2",
+    "playwright": "^1.59.1",
+    "typescript": "~5.9.3",
+    "vite": "^8.0.1"
+  },
+  "dependencies": {
+    "maplibre-gl": "^5.22.0",
+    "pmtiles": "^4.4.0"
+  }
+}

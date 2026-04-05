@@ -1,0 +1,399 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+}
+
+/* Override MapLibre default canvas cursor */
+.maplibregl-canvas {
+  cursor: grab;
+}
+.maplibregl-canvas:active {
+  cursor: grabbing;
+}
+
+/* --- UI overlay --- */
+#ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+#title-card {
+  pointer-events: auto;
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  background: rgba(255, 252, 244, 0.94);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  padding: 8px 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+#title-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1a1a2e;
+  letter-spacing: 0.3px;
+}
+
+#no-tiles-warning {
+  display: none;
+  pointer-events: auto;
+  position: absolute;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 6px;
+  padding: 12px 18px;
+  font-size: 14px;
+  color: #7c5800;
+  text-align: center;
+  max-width: 340px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+#no-tiles-warning code {
+  background: rgba(0, 0, 0, 0.07);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 13px;
+}
+
+/* --- MapLibre control overrides (OS aesthetic) --- */
+.maplibregl-ctrl-group {
+  background: rgba(255, 252, 244, 0.94) !important;
+  border-radius: 6px !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14) !important;
+  border: 1px solid rgba(0, 0, 0, 0.12) !important;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  margin: 0 16px 12px 0 !important;
+}
+
+.maplibregl-ctrl-group button {
+  color: #1a1a2e !important;
+}
+
+.maplibregl-ctrl-group button:hover {
+  background: rgba(0, 0, 0, 0.06) !important;
+}
+
+.maplibregl-ctrl-attrib {
+  font-size: 11px !important;
+  background: rgba(255, 252, 244, 0.85) !important;
+}
+
+.maplibregl-ctrl-scale {
+  background: rgba(255, 252, 244, 0.92) !important;
+  border-color: #888 !important;
+  font-size: 11px !important;
+  padding: 0 4px !important;
+}
+
+/* ── Zoom level hotlinks ────────────────────────────────────────────────────── */
+
+#zoom-links {
+  pointer-events: auto;
+  position: absolute;
+  bottom: 36px;  /* sits above the scale bar (~20px) + its 10px bottom margin */
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.zoom-link {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: #1a1a2e;
+  background: rgba(255, 252, 244, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 4px;
+  padding: 4px 9px;
+  cursor: pointer;
+  letter-spacing: 0.2px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.10);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.zoom-link:hover {
+  background: rgba(255, 252, 244, 1);
+  border-color: rgba(0, 0, 0, 0.28);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16);
+}
+
+.zoom-link.active {
+  background: #1a1a2e;
+  color: #f4efe0;
+  border-color: #1a1a2e;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.22);
+}
+
+/* ── Overlays panel ─────────────────────────────────────────────────────────── */
+
+#overlays-panel {
+  pointer-events: auto;
+  position: absolute;
+  top: 60px;
+  left: 16px;
+  background: rgba(255, 252, 244, 0.94);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  padding: 10px 14px 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  min-width: 192px;
+}
+
+#overlays-header {
+  margin-bottom: 10px;
+}
+
+#overlays-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a1a2e;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+/* Section within the panel */
+.overlay-section {
+  margin-top: 2px;
+}
+
+.overlay-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #444;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.overlay-section-subtitle {
+  font-size: 11px;
+  color: #555;
+  margin-bottom: 6px;
+  min-height: 14px;
+}
+
+.overlay-divider {
+  height: 1px;
+  background: rgba(0, 0, 0, 0.1);
+  margin: 10px 0;
+}
+
+/* Toggle row container */
+.overlay-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Toggle switch row */
+.overlay-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.overlay-toggle input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+/* The pill track */
+.overlay-toggle-track {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 30px;
+  height: 16px;
+  background: #ccc;
+  border-radius: 8px;
+  position: relative;
+  transition: background 0.15s;
+}
+
+.overlay-toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  transition: transform 0.15s;
+}
+
+.overlay-toggle input:checked ~ .overlay-toggle-track {
+  background: #1a1a2e;
+}
+
+.overlay-toggle input:checked ~ .overlay-toggle-track::after {
+  transform: translateX(14px);
+}
+
+.overlay-toggle-label {
+  font-size: 12px;
+  color: #1a1a2e;
+}
+
+/* Census metric radio group */
+#census-metrics {
+  border: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.census-radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.census-radio input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.census-radio-dot {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid #aaa;
+  border-radius: 50%;
+  position: relative;
+  transition: border-color 0.15s;
+}
+
+.census-radio-dot::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #1a1a2e;
+  transform: translate(-50%, -50%) scale(0);
+  transition: transform 0.15s;
+}
+
+.census-radio input:checked ~ .census-radio-dot {
+  border-color: #1a1a2e;
+}
+
+.census-radio input:checked ~ .census-radio-dot::after {
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.census-swatch {
+  display: inline-block;
+  width: 22px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  opacity: 0.45;
+  transition: opacity 0.15s;
+}
+
+.census-radio input:checked ~ .census-swatch {
+  opacity: 1;
+}
+
+.census-swatch--population  { background: linear-gradient(to right, #c6dbef, #08306b); }
+.census-swatch--density     { background: linear-gradient(to right, #fee391, #662506); }
+.census-swatch--working_age { background: linear-gradient(to right, #c7e9b4, #0c2c84); }
+
+.census-radio-label {
+  font-size: 12px;
+  color: #1a1a2e;
+}
+
+/* Mini legend bar shown when a metric is active */
+#census-legend {
+  display: none;
+  margin-top: 8px;
+}
+
+#census-legend-bar {
+  height: 10px;
+  border-radius: 3px;
+  width: 100%;
+}
+
+#census-legend-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 3px;
+}
+
+#census-legend-min,
+#census-legend-max {
+  font-size: 10px;
+  color: #666;
+}
+
+#census-loading {
+  display: none;
+}
+
+/* Last-updated footer */
+#census-updated {
+  display: none;
+  margin-top: 6px;
+  font-size: 10px;
+  color: #888;
+}
+
+#census-error {
+  display: none;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #b91c1c;
+  line-height: 1.4;
+}
