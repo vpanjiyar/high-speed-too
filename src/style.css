@@ -669,3 +669,472 @@ html, body {
   flex-direction: column;
   gap: 8px;
 }
+
+/* ── Station Manager (right-side drawer) ───────────────────────────────────── */
+
+#station-manager {
+  pointer-events: auto;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 280px;
+  background: rgba(255, 252, 244, 0.97);
+  border-left: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  z-index: 20;
+}
+
+/* When Line Manager is also open, shift SM left of LM */
+#station-manager.lm-open {
+  right: 300px; /* must match #line-manager width */
+}
+
+#station-manager.hidden {
+  display: none;
+}
+
+#station-manager-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
+}
+
+#station-manager-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+#station-manager-icon {
+  flex-shrink: 0;
+  color: #1a1a2e;
+  opacity: 0.6;
+  display: flex;
+  align-items: center;
+}
+
+#station-manager-name {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a2e;
+  background: transparent;
+  border: none;
+  border-bottom: 1.5px solid transparent;
+  border-radius: 0;
+  padding: 2px 0;
+  outline: none;
+  width: 100%;
+  min-width: 0;
+  transition: border-color 0.15s;
+}
+
+#station-manager-name:hover {
+  border-bottom-color: rgba(0, 0, 0, 0.2);
+}
+
+#station-manager-name:focus {
+  border-bottom-color: #1E88E5;
+}
+
+#station-manager-close {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: #888;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.12s, color 0.12s;
+}
+
+#station-manager-close:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #1a1a2e;
+}
+
+#station-manager-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0 16px;
+}
+
+.sm-section {
+  padding: 12px 16px;
+}
+
+.sm-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.sm-section-sub {
+  font-size: 10px;
+  font-weight: 400;
+  color: #aaa;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.sm-divider {
+  height: 1px;
+  background: rgba(0, 0, 0, 0.07);
+  margin: 0 16px;
+}
+
+/* ── Stats grid (2×2) ──────────────────────────────────────────────────────── */
+
+#sm-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.sm-stat {
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 6px;
+  padding: 10px 10px 8px;
+}
+
+.sm-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a1a2e;
+  letter-spacing: -0.3px;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.sm-stat-label {
+  font-size: 10px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.sm-loading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: #888;
+  margin-top: 8px;
+}
+
+.sm-loading.hidden { display: none; }
+
+.sm-error {
+  font-size: 11px;
+  color: #b91c1c;
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+.sm-error.hidden { display: none; }
+
+/* Spinner animation */
+.sm-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(0, 0, 0, 0.1);
+  border-top-color: #1a1a2e;
+  border-radius: 50%;
+  animation: sm-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes sm-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Lines list ────────────────────────────────────────────────────────────── */
+
+#sm-lines-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sm-line-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.sm-line-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sm-line-name {
+  font-size: 12px;
+  color: #1a1a2e;
+  font-weight: 500;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sm-line-stop-num {
+  font-size: 10px;
+  color: #aaa;
+  flex-shrink: 0;
+}
+
+.sm-lines-empty {
+  font-size: 11px;
+  color: #aaa;
+  font-style: italic;
+}
+
+/* ── Delete button ─────────────────────────────────────────────────────────── */
+
+.sm-delete-btn {
+  width: 100%;
+  text-align: center;
+  padding: 7px 12px;
+}
+
+/* ── Line Manager (right-side drawer, stacks to right of Station Manager) ── */
+
+#line-manager {
+  pointer-events: auto;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 300px;
+  background: rgba(248, 248, 255, 0.97);
+  border-left: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  z-index: 19; /* one below station manager so SM sits on top if they overlap */
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#line-manager.hidden {
+  display: none;
+}
+
+#line-manager-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
+}
+
+#line-manager-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+#line-manager-icon {
+  flex-shrink: 0;
+  color: #1a1a2e;
+  opacity: 0.6;
+  display: flex;
+  align-items: center;
+}
+
+#line-manager-name {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a2e;
+  background: transparent;
+  border: none;
+  border-bottom: 1.5px solid transparent;
+  border-radius: 0;
+  padding: 2px 0;
+  outline: none;
+  width: 100%;
+  min-width: 0;
+  transition: border-color 0.15s;
+}
+
+#line-manager-name:hover  { border-bottom-color: rgba(0,0,0,0.2); }
+#line-manager-name:focus  { border-bottom-color: #1E88E5; }
+
+#line-manager-close {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: #888;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.12s, color 0.12s;
+}
+#line-manager-close:hover {
+  background: rgba(0,0,0,0.06);
+  color: #1a1a2e;
+}
+
+#line-manager-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0 16px;
+}
+
+/* ── Line colour swatches (in Line Manager) ──────────────────────────────── */
+
+#lm-color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.lm-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2.5px solid transparent;
+  transition: transform 0.1s, border-color 0.1s;
+  flex-shrink: 0;
+}
+
+.lm-swatch:hover { transform: scale(1.18); }
+.lm-swatch.selected {
+  border-color: #fff;
+  outline: 2px solid rgba(0,0,0,0.5);
+  transform: scale(1.15);
+}
+
+/* ── Line Manager stats grid (reuses sm-stat classes) ───────────────────── */
+
+#lm-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+/* ── Stop list (Transport Fever–style vertical diagram) ─────────────────── */
+
+#lm-stop-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.lm-stop-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 1px 0;
+  cursor: pointer;
+  border-radius: 5px;
+  transition: background 0.1s;
+  position: relative;
+}
+
+.lm-stop-item:hover {
+  background: rgba(0,0,0,0.04);
+}
+
+.lm-stop-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 18px;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+.lm-stop-seg {
+  width: 3px;
+  height: 10px;
+  /* colour set via inline style */
+  flex-shrink: 0;
+}
+
+.lm-stop-seg.invisible {
+  background: transparent !important;
+}
+
+.lm-stop-circle {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2.5px solid;
+  /* border-color set via inline style */
+  background: #fff;
+  flex-shrink: 0;
+  z-index: 1;
+}
+
+.lm-stop-name {
+  font-size: 12.5px;
+  color: #1a1a2e;
+  font-weight: 500;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 2.4;
+}
+
+.lm-stop-arrow {
+  font-size: 10px;
+  color: #ccc;
+  flex-shrink: 0;
+  margin-right: 6px;
+  transition: color 0.1s;
+}
+
+.lm-stop-item:hover .lm-stop-arrow {
+  color: #888;
+}
+
+.lm-stops-empty {
+  font-size: 11px;
+  color: #aaa;
+  font-style: italic;
+}
+
+/* Badge in Station Manager — make line badges clickable */
+.sm-line-badge {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.sm-line-badge:hover {
+  background: rgba(0, 0, 0, 0.07);
+}
+

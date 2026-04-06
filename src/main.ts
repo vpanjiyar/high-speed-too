@@ -8,6 +8,7 @@ import type { CensusMetric, CensusOverlayState } from './census-overlay';
 import { NetworkEditor } from './network-editor';
 import type { EditorState } from './network-editor';
 import { LINE_COLORS } from './network';
+import { fetchCatchmentStats, preloadLsoa, fetchLineCatchmentStats } from './station-manager';
 
 // Register the PMTiles custom protocol so MapLibre can load .pmtiles files
 // via HTTP range-requests from a single static file.
@@ -154,6 +155,9 @@ map.on('load', () => {
   const overlay = new CensusOverlay(map, updateCensusUI);
   _w['__censusOverlay'] = overlay;
 
+  // Pre-warm LSOA data so Station Manager loads fast
+  preloadLsoa();
+
   document.querySelectorAll<HTMLInputElement>('input[name="census-metric"]').forEach((radio) => {
     radio.addEventListener('change', () => {
       overlay.setMetric(radio.value as CensusMetric);
@@ -170,30 +174,302 @@ map.on('load', () => {
   // eslint-disable-next-line prefer-const
   let editor!: NetworkEditor;
 
+  // ── Panel element references ────────────────────────────────────────────
+  const smEl = document.getElementById('station-manager')!;
+  const lmEl = document.getElementById('line-manager')!;
+
+  // ── Line Manager helpers ────────────────────────────────────────────────
+
+  let openLineId: string | null = null;
+  /** Stable signature of station IDs for the open line — used to gate census re-fetches. */
+  let openLineStopSig = '';
+
+  function closeLineManager(): void {
+    lmEl.classList.add('hidden');
+    smEl.classList.remove('lm-open');
+    openLineId = null;
+    openLineStopSig = '';
+  }
+
+  function renderLmSwatches(lineId: string): void {
+    const line = editor.network.getLine(lineId);
+    if (!line) return;
+    const container = document.getElementById('lm-color-swatches')!;
+    container.innerHTML = '';
+    LINE_COLORS.forEach((c) => {
+      const sw = document.createElement('div');
+      sw.className = 'lm-swatch' + (c === line.color ? ' selected' : '');
+      sw.style.background = c;
+      sw.addEventListener('click', () => {
+        editor.network.setLineColor(lineId, c);
+        renderLmSwatches(lineId);
+        renderLmHeader(lineId);
+        renderLineList(editor.getState());
+      });
+      container.appendChild(sw);
+    });
+  }
+
+  function renderLmHeader(lineId: string): void {
+    const line = editor.network.getLine(lineId);
+    if (!line) return;
+    const icon = document.getElementById('line-manager-icon')!;
+    icon.style.color = line.color;
+    icon.style.opacity = '1';
+  }
+
+  function renderLmStops(lineId: string): void {
+    const line = editor.network.getLine(lineId);
+    const list = document.getElementById('lm-stop-list')!;
+    const countEl = document.getElementById('lm-stop-count')!;
+    list.innerHTML = '';
+
+    if (!line || line.stationIds.length === 0) {
+      countEl.textContent = '';
+      const empty = document.createElement('p');
+      empty.className = 'lm-stops-empty';
+      empty.textContent = 'No stops yet — switch to line mode and click the map.';
+      list.appendChild(empty);
+      return;
+    }
+
+    countEl.textContent = `${line.stationIds.length} stop${line.stationIds.length !== 1 ? 's' : ''}`;
+
+    line.stationIds.forEach((sid, idx) => {
+      const station = editor.network.getStation(sid);
+      const name = station?.name ?? '(unknown)';
+      const isFirst = idx === 0;
+      const isLast  = idx === line.stationIds.length - 1;
+
+      const item = document.createElement('div');
+      item.className = 'lm-stop-item';
+      item.dataset.stationId = sid;
+
+      const rail = document.createElement('div');
+      rail.className = 'lm-stop-rail';
+
+      const segTop = document.createElement('div');
+      segTop.className = 'lm-stop-seg' + (isFirst ? ' invisible' : '');
+      segTop.style.background = line.color;
+
+      const circle = document.createElement('div');
+      circle.className = 'lm-stop-circle';
+      circle.style.borderColor = line.color;
+
+      const segBottom = document.createElement('div');
+      segBottom.className = 'lm-stop-seg' + (isLast ? ' invisible' : '');
+      segBottom.style.background = line.color;
+
+      rail.appendChild(segTop);
+      rail.appendChild(circle);
+      rail.appendChild(segBottom);
+
+      const nameEl = document.createElement('div');
+      nameEl.className = 'lm-stop-name';
+      nameEl.textContent = name;
+
+      const arrow = document.createElement('div');
+      arrow.className = 'lm-stop-arrow';
+      arrow.textContent = '›';
+
+      item.appendChild(rail);
+      item.appendChild(nameEl);
+      item.appendChild(arrow);
+
+      item.addEventListener('click', () => {
+        if (station) editor.selectStation(station.id);
+      });
+
+      list.appendChild(item);
+    });
+  }
+
+  function refreshLmStats(lineId: string): void {
+    const line = editor.network.getLine(lineId);
+    if (!line) return;
+    const grid = document.getElementById('lm-stats-grid')!;
+    const loadingEl = document.getElementById('lm-stats-loading')!;
+    const errorEl = document.getElementById('lm-stats-error')!;
+    grid.style.display = 'none';
+    loadingEl.classList.remove('hidden');
+    errorEl.classList.add('hidden');
+
+    const stations = line.stationIds
+      .map((id) => editor.network.getStation(id))
+      .filter((s): s is NonNullable<typeof s> => !!s);
+
+    fetchLineCatchmentStats(stations).then((stats) => {
+      if (openLineId !== lineId) return;
+      loadingEl.classList.add('hidden');
+      if (stats.lsoaCount === 0) {
+        errorEl.textContent = line.stationIds.length === 0
+          ? 'Add stops to see catchment data.'
+          : 'No census data nearby.';
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      document.getElementById('lm-stat-pop')!.textContent     = stats.population.toLocaleString('en-GB');
+      document.getElementById('lm-stat-workers')!.textContent  = stats.workingAge.toLocaleString('en-GB');
+      document.getElementById('lm-stat-pct')!.textContent      = `${stats.workingAgePct.toFixed(1)}%`;
+      document.getElementById('lm-stat-density')!.textContent  = stats.densityPerHa.toFixed(1);
+      grid.style.display = 'grid';
+    }).catch(() => {
+      loadingEl.classList.add('hidden');
+      errorEl.textContent = 'Failed to load census data.';
+      errorEl.classList.remove('hidden');
+    });
+  }
+
+  function openLineManager(lineId: string): void {
+    const line = editor.network.getLine(lineId);
+    if (!line) return;
+    const wasAlreadyOpen = openLineId === lineId;
+    openLineId = lineId;
+    lmEl.classList.remove('hidden');
+    smEl.classList.add('lm-open');   // shift SM left of LM
+
+    (document.getElementById('line-manager-name') as HTMLInputElement).value = line.name;
+    renderLmHeader(lineId);
+    renderLmSwatches(lineId);
+    renderLmStops(lineId);
+
+    // Fetch census stats only on first open or when stops changed
+    const sig = line.stationIds.join(',');
+    if (!wasAlreadyOpen || sig !== openLineStopSig) {
+      openLineStopSig = sig;
+      refreshLmStats(lineId);
+    }
+  }
+
+  // ── Station Manager helpers ─────────────────────────────────────────────
+
+  /** Station ID whose census data is currently loaded (avoid redundant fetches). */
+  let smCensusStationId: string | null = null;
+
+  function closeStationManager(): void {
+    smEl.classList.add('hidden');
+    smCensusStationId = null;
+  }
+
+  function renderManagerLines(stationId: string): void {
+    const list = document.getElementById('sm-lines-list')!;
+    list.innerHTML = '';
+    const lines = editor.network.lines.filter((l) => l.stationIds.includes(stationId));
+    if (lines.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'sm-lines-empty';
+      empty.textContent = 'Not on any line yet.';
+      list.appendChild(empty);
+      return;
+    }
+    lines.forEach((line) => {
+      const badge = document.createElement('div');
+      badge.className = 'sm-line-badge';
+      badge.title = 'Open line details';
+
+      const dot = document.createElement('span');
+      dot.className = 'sm-line-dot';
+      dot.style.background = line.color;
+
+      const name = document.createElement('span');
+      name.className = 'sm-line-name';
+      name.textContent = line.name;
+
+      const stops = document.createElement('span');
+      stops.className = 'sm-line-stop-num';
+      stops.textContent = `${line.stationIds.length} stops`;
+
+      badge.appendChild(dot);
+      badge.appendChild(name);
+      badge.appendChild(stops);
+
+      badge.addEventListener('click', () => openLineManager(line.id));
+
+      list.appendChild(badge);
+    });
+  }
+
+  function openStationManager(stationId: string): void {
+    const station = editor.network.getStation(stationId);
+    if (!station) return;
+
+    smEl.classList.remove('hidden');
+
+    // Always update name + lines (may have changed)
+    (document.getElementById('station-manager-name') as HTMLInputElement).value = station.name;
+    renderManagerLines(stationId);
+
+    // Only re-fetch census when the selected station changes
+    if (smCensusStationId !== stationId) {
+      smCensusStationId = stationId;
+
+      const grid = document.getElementById('sm-stats-grid')!;
+      const loadingEl = document.getElementById('sm-stats-loading')!;
+      const errorEl = document.getElementById('sm-stats-error')!;
+      grid.style.display = 'none';
+      loadingEl.classList.remove('hidden');
+      errorEl.classList.add('hidden');
+
+      fetchCatchmentStats(station.lng, station.lat).then((stats) => {
+        if (smCensusStationId !== stationId) return;
+        loadingEl.classList.add('hidden');
+        if (stats.lsoaCount === 0) {
+          errorEl.textContent = 'No census data nearby.';
+          errorEl.classList.remove('hidden');
+          return;
+        }
+        document.getElementById('sm-stat-pop')!.textContent     = stats.population.toLocaleString('en-GB');
+        document.getElementById('sm-stat-workers')!.textContent  = stats.workingAge.toLocaleString('en-GB');
+        document.getElementById('sm-stat-pct')!.textContent      = `${stats.workingAgePct.toFixed(1)}%`;
+        document.getElementById('sm-stat-density')!.textContent  = stats.densityPerHa.toFixed(1);
+        grid.style.display = 'grid';
+      }).catch(() => {
+        loadingEl.classList.add('hidden');
+        errorEl.textContent = 'Failed to load census data.';
+        errorEl.classList.remove('hidden');
+      });
+    }
+  }
+
+  // ── Network UI callbacks ────────────────────────────────────────────────
+
   function updateNetworkUI(state: EditorState): void {
-    // Update toolbar active states
     document.querySelectorAll<HTMLButtonElement>('.tool-btn').forEach((btn) => {
-      const mode = btn.id.replace('tool-', '');
-      btn.classList.toggle('active', mode === state.mode);
+      btn.classList.toggle('active', btn.id.replace('tool-', '') === state.mode);
     });
 
-    // Show/hide panels
     const linePanel = document.getElementById('line-panel')!;
-    const stationPanel = document.getElementById('station-panel')!;
+    linePanel.classList.toggle('hidden', state.mode !== 'line');
 
-    if (state.mode === 'line') {
-      linePanel.classList.remove('hidden');
-      stationPanel.classList.add('hidden');
-    } else if (state.selectedStationId) {
-      stationPanel.classList.remove('hidden');
-      linePanel.classList.add('hidden');
-
-      const station = editor.network.getStation(state.selectedStationId);
-      if (station) {
-        (document.getElementById('station-name-input') as HTMLInputElement).value = station.name;
-      }
+    // Station manager
+    if (state.selectedStationId) {
+      openStationManager(state.selectedStationId);
     } else {
-      stationPanel.classList.add('hidden');
+      closeStationManager();
+    }
+
+    // Automatically open Line Manager when a line becomes active
+    if (state.activeLineId && state.activeLineId !== openLineId) {
+      openLineManager(state.activeLineId);
+    }
+
+    // Refresh LM content if it is open (stops change as user draws)
+    if (openLineId) {
+      const line = editor.network.getLine(openLineId);
+      if (!line) {
+        closeLineManager();
+      } else {
+        renderLmStops(openLineId);
+        (document.getElementById('line-manager-name') as HTMLInputElement).value = line.name;
+        renderLmHeader(openLineId);
+        renderLmSwatches(openLineId);
+        // Re-fetch census only when stop list changed
+        const sig = line.stationIds.join(',');
+        if (sig !== openLineStopSig) {
+          openLineStopSig = sig;
+          refreshLmStats(openLineId);
+        }
+      }
     }
 
     renderLineList(state);
@@ -225,6 +501,7 @@ map.on('load', () => {
       del.textContent = '×';
       del.addEventListener('click', (e) => {
         e.stopPropagation();
+        if (openLineId === line.id) closeLineManager();
         editor.deleteLine(line.id);
       });
 
@@ -235,6 +512,7 @@ map.on('load', () => {
 
       item.addEventListener('click', () => {
         editor.setActiveLine(line.id);
+        openLineManager(line.id);
       });
 
       container.appendChild(item);
@@ -256,10 +534,13 @@ map.on('load', () => {
       if (mode === 'line') {
         editor.setMode('line');
         document.getElementById('line-panel')!.classList.remove('hidden');
-        document.getElementById('station-panel')!.classList.add('hidden');
       } else {
         editor.setMode(mode as 'select' | 'station');
         document.getElementById('line-panel')!.classList.add('hidden');
+        if (mode !== 'select') {
+          closeStationManager();
+          closeLineManager();
+        }
       }
     });
   });
@@ -268,6 +549,8 @@ map.on('load', () => {
   document.getElementById('tool-clear')!.addEventListener('click', () => {
     if (editor.network.stations.length === 0 && editor.network.lines.length === 0) return;
     if (confirm('Clear the entire network?')) {
+      closeLineManager();
+      closeStationManager();
       editor.clearNetwork();
     }
   });
@@ -278,10 +561,65 @@ map.on('load', () => {
     editor.setMode('select');
   });
 
-  // Station panel close
-  document.getElementById('station-panel-close')!.addEventListener('click', () => {
-    document.getElementById('station-panel')!.classList.add('hidden');
-    editor.setMode('select');
+  // Station Manager wiring
+  document.getElementById('station-manager-close')!.addEventListener('click', () => {
+    editor.deselectStation();
+  });
+
+  const smNameInput = document.getElementById('station-manager-name') as HTMLInputElement;
+  smNameInput.addEventListener('change', () => {
+    const name = smNameInput.value.trim();
+    if (name) {
+      editor.renameSelectedStation(name);
+      const state = editor.getState();
+      if (state.selectedStationId) {
+        renderManagerLines(state.selectedStationId);
+        // Refresh stop name in open Line Manager
+        if (openLineId) renderLmStops(openLineId);
+      }
+    }
+  });
+  smNameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') smNameInput.blur();
+  });
+
+  document.getElementById('station-manager-delete')!.addEventListener('click', () => {
+    if (openLineId) {
+      // Refresh stop list after deletion
+      const lineId = openLineId;
+      editor.deleteSelectedStation();
+      renderLmStops(lineId);
+    } else {
+      editor.deleteSelectedStation();
+    }
+  });
+
+  // ── Line Manager wiring ─────────────────────────────────────────────────
+
+  document.getElementById('line-manager-close')!.addEventListener('click', () => {
+    closeLineManager();
+  });
+
+  const lmNameInput = document.getElementById('line-manager-name') as HTMLInputElement;
+  lmNameInput.addEventListener('change', () => {
+    const name = lmNameInput.value.trim();
+    if (name && openLineId) {
+      editor.network.renameLine(openLineId, name);
+      renderLineList(editor.getState());
+      // Refresh SM line badges if a station is selected
+      const state = editor.getState();
+      if (state.selectedStationId) renderManagerLines(state.selectedStationId);
+    }
+  });
+  lmNameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') lmNameInput.blur();
+  });
+
+  document.getElementById('line-manager-delete')!.addEventListener('click', () => {
+    if (!openLineId) return;
+    const lid = openLineId;
+    closeLineManager();
+    editor.deleteLine(lid);
   });
 
   // Color swatches for new line
@@ -311,18 +649,6 @@ map.on('load', () => {
     nameInput.value = '';
     selectedColor = editor.network.nextColor();
     renderColorSwatches();
-  });
-
-  // Station name input
-  const stationNameInput = document.getElementById('station-name-input') as HTMLInputElement;
-  stationNameInput.addEventListener('change', () => {
-    editor.renameSelectedStation(stationNameInput.value.trim());
-  });
-
-  // Station delete
-  document.getElementById('station-delete')!.addEventListener('click', () => {
-    editor.deleteSelectedStation();
-    document.getElementById('station-panel')!.classList.add('hidden');
   });
 
   // Trigger initial UI sync now that editor is fully constructed and assigned

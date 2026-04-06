@@ -125,15 +125,135 @@
         <div id="line-list"></div>
       </div>
 
-      <!-- ── Station info panel (shown when station selected) ─────────────── -->
-      <div id="station-panel" class="panel hidden">
-        <div class="panel-header">
-          <span class="panel-title">Station</span>
-          <button id="station-panel-close" class="panel-close" title="Close">&times;</button>
+      <!-- ── Station Manager panel (right side, shown when station selected) ── -->
+      <div id="station-manager" class="hidden">
+        <div id="station-manager-header">
+          <div id="station-manager-title-row">
+            <div id="station-manager-icon">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>
+            </div>
+            <input id="station-manager-name" type="text" placeholder="Station name…" maxlength="60" autocomplete="off" spellcheck="false" />
+          </div>
+          <button id="station-manager-close" title="Close">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 2l10 10M12 2L2 12"/></svg>
+          </button>
         </div>
-        <div id="station-edit">
-          <input id="station-name-input" type="text" placeholder="Station name…" maxlength="60" autocomplete="off" />
-          <button id="station-delete" class="btn-danger">Delete</button>
+
+        <div id="station-manager-body">
+
+          <!-- Catchment section -->
+          <div class="sm-section">
+            <div class="sm-section-label">Catchment <span class="sm-section-sub">within 1.2 km</span></div>
+            <div id="sm-stats-grid">
+              <div class="sm-stat">
+                <div class="sm-stat-value" id="sm-stat-pop">—</div>
+                <div class="sm-stat-label">Residents</div>
+              </div>
+              <div class="sm-stat">
+                <div class="sm-stat-value" id="sm-stat-workers">—</div>
+                <div class="sm-stat-label">Working age</div>
+              </div>
+              <div class="sm-stat">
+                <div class="sm-stat-value" id="sm-stat-pct">—</div>
+                <div class="sm-stat-label">Work. age %</div>
+              </div>
+              <div class="sm-stat">
+                <div class="sm-stat-value" id="sm-stat-density">—</div>
+                <div class="sm-stat-label">Pop / ha</div>
+              </div>
+            </div>
+            <div id="sm-stats-loading" class="sm-loading hidden">
+              <span class="sm-spinner"></span> Loading census data…
+            </div>
+            <div id="sm-stats-error" class="sm-error hidden"></div>
+          </div>
+
+          <div class="sm-divider"></div>
+
+          <!-- Lines section -->
+          <div class="sm-section">
+            <div class="sm-section-label">Lines</div>
+            <div id="sm-lines-list">
+              <div class="sm-lines-empty">Not on any line</div>
+            </div>
+          </div>
+
+          <div class="sm-divider"></div>
+
+          <!-- Actions -->
+          <div class="sm-section">
+            <button id="station-manager-delete" class="btn-danger sm-delete-btn">Remove station</button>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Line Manager — slides in from the right, further right than Station Manager -->
+      <div id="line-manager" class="hidden">
+        <div id="line-manager-header">
+          <div id="line-manager-title-row">
+            <div id="line-manager-icon">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><line x1="2" y1="8" x2="14" y2="8"/><circle cx="5" cy="8" r="2.5" fill="currentColor" stroke="none"/><circle cx="11" cy="8" r="2.5" fill="currentColor" stroke="none"/></svg>
+            </div>
+            <input id="line-manager-name" type="text" placeholder="Line name…" maxlength="60" autocomplete="off" spellcheck="false" />
+          </div>
+          <button id="line-manager-close" title="Close">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 2l10 10M12 2L2 12"/></svg>
+          </button>
+        </div>
+
+        <div id="line-manager-body">
+
+          <!-- Colour section -->
+          <div class="sm-section">
+            <div class="sm-section-label">Colour</div>
+            <div id="lm-color-swatches"></div>
+          </div>
+
+          <div class="sm-divider"></div>
+
+          <!-- Catchment across all stops -->
+          <div class="sm-section">
+            <div class="sm-section-label">Catchment <span class="sm-section-sub">all stops combined</span></div>
+            <div id="lm-stats-grid">
+              <div class="sm-stat">
+                <div class="sm-stat-value" id="lm-stat-pop">—</div>
+                <div class="sm-stat-label">Residents</div>
+              </div>
+              <div class="sm-stat">
+                <div class="sm-stat-value" id="lm-stat-workers">—</div>
+                <div class="sm-stat-label">Working age</div>
+              </div>
+              <div class="sm-stat">
+                <div class="sm-stat-value" id="lm-stat-pct">—</div>
+                <div class="sm-stat-label">Work. age %</div>
+              </div>
+              <div class="sm-stat">
+                <div class="sm-stat-value" id="lm-stat-density">—</div>
+                <div class="sm-stat-label">Pop / ha</div>
+              </div>
+            </div>
+            <div id="lm-stats-loading" class="sm-loading hidden">
+              <span class="sm-spinner"></span> Loading census data…
+            </div>
+            <div id="lm-stats-error" class="sm-error hidden"></div>
+          </div>
+
+          <div class="sm-divider"></div>
+
+          <!-- Stop list -->
+          <div class="sm-section">
+            <div class="sm-section-label">Stops <span id="lm-stop-count" class="sm-section-sub"></span></div>
+            <div id="lm-stop-list"></div>
+          </div>
+
+          <div class="sm-divider"></div>
+
+          <!-- Actions -->
+          <div class="sm-section">
+            <button id="line-manager-delete" class="btn-danger sm-delete-btn">Delete line</button>
+          </div>
+
         </div>
       </div>
 

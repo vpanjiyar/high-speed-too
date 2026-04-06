@@ -153,6 +153,26 @@ export class NetworkEditor {
     this.network.renameStation(this.selectedStationId, name);
   }
 
+  deselectStation(): void {
+    if (this.selectedStationId === null) return;
+    this.selectedStationId = null;
+    this.renderer.setSelectedStation(null);
+    this._emit();
+  }
+
+  /** Programmatically select a station (e.g. from Line Manager stop list click). */
+  selectStation(id: string): void {
+    const station = this.network.getStation(id);
+    if (!station) return;
+    this.selectedStationId = id;
+    this.renderer.setSelectedStation(id);
+    if (this.mode !== 'select') {
+      this.mode = 'select';
+      this._updateCursor();
+    }
+    this._emit();
+  }
+
   clearNetwork(): void {
     this.network.clear();
     this.activeLineId = null;

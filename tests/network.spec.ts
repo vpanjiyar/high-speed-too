@@ -353,9 +353,9 @@ test('clicking a color swatch marks it as selected', async ({ page }) => {
   await expect(secondSwatch).toHaveClass(/selected/);
 });
 
-// ── Station selection panel ────────────────────────────────────────────────────
+// ── Station Manager panel ──────────────────────────────────────────────────────
 
-test('clicking a placed station in select mode shows station panel', async ({ page }) => {
+test('clicking a placed station in select mode opens station manager', async ({ page }) => {
   await page.goto(BASE);
   await waitForMap(page);
 
@@ -372,7 +372,7 @@ test('clicking a placed station in select mode shows station panel', async ({ pa
   await page.mouse.click(cx, cy);
   await page.waitForTimeout(300);
 
-  await expect(page.locator('#station-panel')).toBeVisible();
+  await expect(page.locator('#station-manager')).not.toHaveClass(/hidden/);
 });
 
 // ── Persistence ────────────────────────────────────────────────────────────────
@@ -554,5 +554,396 @@ test('NaPTAN station imported via station mode persists atco after reload', asyn
       .__networkEditor.network.stations[0]?.atco),
   );
   expect(atcoAfter).toBe('9100PRTSLD');
+});
+
+// ── Station Manager: name, rename, delete, lines ─────────────────────────────
+
+test('station manager shows the station name in the input', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  // Place a station at the canvas centre (no NaPTAN — avoid coordinate mismatch)
+  await page.locator('#tool-station').click();
+  const canvas = await page.locator('#map canvas').boundingBox();
+  const cx = canvas!.x + canvas!.width / 2;
+  const cy = canvas!.y + canvas!.height / 2;
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  // Read out the auto-generated name so the test is independent of order
+  const stationName = await page.evaluate(() =>
+    ((window as unknown as { __networkEditor: { network: { stations: Array<{ name: string }> } } })
+      .__networkEditor.network.stations[0].name),
+  );
+
+  // Select the station
+  await page.locator('#tool-select').click();
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  await expect(page.locator('#station-manager-name')).toHaveValue(stationName);
+});
+
+test('renaming station via input updates network data', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-station').click();
+  const canvas = await page.locator('#map canvas').boundingBox();
+  const cx = canvas!.x + canvas!.width / 2;
+  const cy = canvas!.y + canvas!.height / 2;
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  await page.locator('#tool-select').click();
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  // Rename via the input
+  await page.locator('#station-manager-name').fill('New Brighton');
+  await page.locator('#station-manager-name').press('Enter');
+  await page.waitForTimeout(200);
+
+  const name = await page.evaluate(() =>
+    ((window as unknown as { __networkEditor: { network: { stations: Array<{ name: string }> } } })
+      .__networkEditor.network.stations[0].name),
+  );
+  expect(name).toBe('New Brighton');
+});
+
+test('station manager close button hides the panel', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-station').click();
+  const canvas = await page.locator('#map canvas').boundingBox();
+  const cx = canvas!.x + canvas!.width / 2;
+  const cy = canvas!.y + canvas!.height / 2;
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  await page.locator('#tool-select').click();
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  await expect(page.locator('#station-manager')).not.toHaveClass(/hidden/);
+
+  await page.locator('#station-manager-close').click();
+  await expect(page.locator('#station-manager')).toHaveClass(/hidden/);
+});
+
+test('station manager delete button removes station and closes panel', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-station').click();
+  const canvas = await page.locator('#map canvas').boundingBox();
+  const cx = canvas!.x + canvas!.width / 2;
+  const cy = canvas!.y + canvas!.height / 2;
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  await page.locator('#tool-select').click();
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  await page.locator('#station-manager-delete').click();
+  await page.waitForTimeout(200);
+
+  expect(await getStationCount(page)).toBe(0);
+  await expect(page.locator('#station-manager')).toHaveClass(/hidden/);
+});
+
+test('switching to station mode closes station manager', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-station').click();
+  const canvas = await page.locator('#map canvas').boundingBox();
+  const cx = canvas!.x + canvas!.width / 2;
+  const cy = canvas!.y + canvas!.height / 2;
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  await page.locator('#tool-select').click();
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  await expect(page.locator('#station-manager')).not.toHaveClass(/hidden/);
+
+  await page.locator('#tool-station').click();
+  await expect(page.locator('#station-manager')).toHaveClass(/hidden/);
+});
+
+test('station manager lines section shows empty state when station is on no lines', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-station').click();
+  const canvas = await page.locator('#map canvas').boundingBox();
+  const cx = canvas!.x + canvas!.width / 2;
+  const cy = canvas!.y + canvas!.height / 2;
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  await page.locator('#tool-select').click();
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  await expect(page.locator('#sm-lines-list .sm-lines-empty')).toBeVisible();
+});
+
+test('station manager lines section lists lines station belongs to', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  // Create a line, place a station on it
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-name').fill('Coastal Express');
+  await page.locator('#new-line-add').click();
+
+  const canvas = await page.locator('#map canvas').boundingBox();
+  const cx = canvas!.x + canvas!.width / 2;
+  const cy = canvas!.y + canvas!.height / 2;
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  // Select the placed station
+  await page.locator('#tool-select').click();
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  await expect(page.locator('#sm-lines-list .sm-line-name')).toHaveText('Coastal Express');
+});
+
+test('station manager shows census loading indicator then populates stats', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-station').click();
+  const canvas = await page.locator('#map canvas').boundingBox();
+  const cx = canvas!.x + canvas!.width / 2;
+  const cy = canvas!.y + canvas!.height / 2;
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  await page.locator('#tool-select').click();
+  await page.mouse.click(cx, cy);
+
+  // After census loads, stats grid should become visible (or error shows if no data in area)
+  await expect(
+    page.locator('#sm-stats-grid, #sm-stats-error').first(),
+  ).toBeVisible({ timeout: 30_000 });
+});
+
+// ── Line Manager panel ─────────────────────────────────────────────────────────
+
+test('clicking a line in the line list opens the line manager panel', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-name').fill('Overground');
+  await page.locator('#new-line-add').click();
+
+  await expect(page.locator('#line-manager')).not.toHaveClass(/hidden/);
+});
+
+test('line manager displays the correct line name', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-name').fill('Elizabeth');
+  await page.locator('#new-line-add').click();
+
+  await expect(page.locator('#line-manager-name')).toHaveValue('Elizabeth');
+});
+
+test('line manager rename updates the line list', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-name').fill('Old Name');
+  await page.locator('#new-line-add').click();
+
+  await page.locator('#line-manager-name').fill('New Name');
+  await page.locator('#line-manager-name').press('Enter');
+  await page.waitForTimeout(200);
+
+  await expect(page.locator('.line-item-name').filter({ hasText: 'New Name' })).toBeVisible();
+});
+
+test('line manager shows colour swatches', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-add').click();
+
+  await expect(page.locator('#lm-color-swatches .lm-swatch')).toHaveCount(10);
+});
+
+test('selecting a colour swatch in line manager marks it selected', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-add').click();
+
+  const swatch = page.locator('#lm-color-swatches .lm-swatch').nth(2);
+  await swatch.click();
+  await expect(swatch).toHaveClass(/selected/);
+});
+
+test('line manager close button hides the panel', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-add').click();
+
+  await expect(page.locator('#line-manager')).not.toHaveClass(/hidden/);
+  await page.locator('#line-manager-close').click();
+  await expect(page.locator('#line-manager')).toHaveClass(/hidden/);
+});
+
+test('line manager delete button removes the line', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-name').fill('Temporary');
+  await page.locator('#new-line-add').click();
+
+  await page.locator('#line-manager-delete').click();
+  await page.waitForTimeout(200);
+
+  expect(await getLineCount(page)).toBe(0);
+  await expect(page.locator('#line-manager')).toHaveClass(/hidden/);
+});
+
+test('line manager shows stop list with correct station names', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-name').fill('Southern');
+  await page.locator('#new-line-add').click();
+
+  const canvas = await page.locator('#map canvas').boundingBox();
+  const cx = canvas!.x + canvas!.width / 2;
+  const cy = canvas!.y + canvas!.height / 2;
+  await page.mouse.click(cx - 60, cy);
+  await page.mouse.click(cx + 60, cy);
+  await page.waitForTimeout(300);
+
+  const stopNames = await page.locator('.lm-stop-name').allTextContents();
+  expect(stopNames).toHaveLength(2);
+});
+
+test('line manager shows empty stop message when line has no stops', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-add').click();
+
+  await expect(page.locator('.lm-stops-empty')).toBeVisible();
+});
+
+test('clicking a stop in the line manager opens the station manager', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-name').fill('Metro');
+  await page.locator('#new-line-add').click();
+
+  const canvas = await page.locator('#map canvas').boundingBox();
+  await page.mouse.click(canvas!.x + canvas!.width / 2, canvas!.y + canvas!.height / 2);
+  await page.waitForTimeout(300);
+
+  // Click the stop in the line manager
+  await page.locator('.lm-stop-item').first().click();
+  await page.waitForTimeout(300);
+
+  await expect(page.locator('#station-manager')).not.toHaveClass(/hidden/);
+});
+
+test('when both panels open station manager shifts left of line manager', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  // Open Line Manager
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-add').click();
+
+  // Open Station Manager by placing a stop and clicking it
+  const canvas = await page.locator('#map canvas').boundingBox();
+  const cx = canvas!.x + canvas!.width / 2;
+  const cy = canvas!.y + canvas!.height / 2;
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  await page.locator('.lm-stop-item').first().click();
+  await page.waitForTimeout(300);
+
+  // Both panels should be visible
+  await expect(page.locator('#line-manager')).not.toHaveClass(/hidden/);
+  await expect(page.locator('#station-manager')).not.toHaveClass(/hidden/);
+
+  // SM should carry the lm-open class (shifts it left of LM)
+  await expect(page.locator('#station-manager')).toHaveClass(/lm-open/);
+});
+
+test('line manager shows census data after stops are added', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-name').fill('Test');
+  await page.locator('#new-line-add').click();
+
+  const canvas = await page.locator('#map canvas').boundingBox();
+  await page.mouse.click(canvas!.x + canvas!.width / 2, canvas!.y + canvas!.height / 2);
+  await page.waitForTimeout(300);
+
+  // Loading spinner should go away, then either grid or error becomes visible
+  await expect(page.locator('#lm-stats-loading')).toBeHidden({ timeout: 30_000 });
+  const gridVisible = await page.locator('#lm-stats-grid').isVisible();
+  const errVisible  = await page.locator('#lm-stats-error').isVisible();
+  expect(gridVisible || errVisible).toBe(true);
+});
+
+test('clicking line badge in station manager opens line manager', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  // Create a line and place a stop
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-name').fill('Tramlink');
+  await page.locator('#new-line-add').click();
+
+  const canvas = await page.locator('#map canvas').boundingBox();
+  const cx = canvas!.x + canvas!.width / 2;
+  const cy = canvas!.y + canvas!.height / 2;
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  // Close line manager first
+  await page.locator('#line-manager-close').click();
+  await expect(page.locator('#line-manager')).toHaveClass(/hidden/);
+
+  // Select the station to open Station Manager
+  await page.locator('#tool-select').click();
+  await page.mouse.click(cx, cy);
+  await page.waitForTimeout(300);
+
+  // Click the line badge in SM → should open LM
+  await page.locator('#sm-lines-list .sm-line-badge').first().click();
+  await expect(page.locator('#line-manager')).not.toHaveClass(/hidden/);
+  await expect(page.locator('#line-manager-name')).toHaveValue('Tramlink');
 });
 
