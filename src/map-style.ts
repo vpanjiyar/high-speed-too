@@ -105,12 +105,19 @@ export function mapStyle(tilesUrl: string): StyleSpecification {
     },
 
     // ── 4. Landcover ──────────────────────────────────────────────────────
+    // minzoom: 8 — at the effective minimum zoom (~6.5, constrained by maxBounds
+    // on a wide viewport) the tiles include European continental data
+    // (Netherlands, Belgium etc.) which renders large green blobs that look like
+    // fictitious landmasses. Schematic mode hides these layers entirely; using
+    // minzoom: 8 ensures both modes are consistent at low zoom. At zoom 8 the
+    // viewport is ≤10° wide so the continental coast is no longer visible.
     {
       id: 'landcover-forest',
       type: 'fill',
       source: src,
       'source-layer': 'landcover',
       filter: ['==', ['get', 'kind'], 'forest'],
+      minzoom: 8,
       paint: { 'fill-color': C.forest, 'fill-opacity': 0.75 },
     },
     {
@@ -119,16 +126,19 @@ export function mapStyle(tilesUrl: string): StyleSpecification {
       source: src,
       'source-layer': 'landcover',
       filter: kindIs('grassland', 'farmland'),
+      minzoom: 8,
       paint: { 'fill-color': C.grass, 'fill-opacity': 0.5 },
     },
 
     // ── 5. Landuse ────────────────────────────────────────────────────────
+    // Same minzoom rationale as landcover above.
     {
       id: 'landuse-national-park',
       type: 'fill',
       source: src,
       'source-layer': 'landuse',
       filter: kindIs('national_park', 'protected_area', 'nature_reserve'),
+      minzoom: 8,
       paint: { 'fill-color': C.nationalPark, 'fill-opacity': 0.6 },
     },
     {
@@ -137,6 +147,7 @@ export function mapStyle(tilesUrl: string): StyleSpecification {
       source: src,
       'source-layer': 'landuse',
       filter: kindIs('park', 'garden', 'recreation_ground', 'playground', 'pitch'),
+      minzoom: 10,
       paint: { 'fill-color': C.park, 'fill-opacity': 0.7 },
     },
     {
@@ -145,6 +156,7 @@ export function mapStyle(tilesUrl: string): StyleSpecification {
       source: src,
       'source-layer': 'landuse',
       filter: kindIs('forest', 'wood'),
+      minzoom: 8,
       paint: { 'fill-color': C.forest, 'fill-opacity': 0.8 },
     },
     {
@@ -153,6 +165,7 @@ export function mapStyle(tilesUrl: string): StyleSpecification {
       source: src,
       'source-layer': 'landuse',
       filter: kindIs('grass', 'meadow', 'farmland', 'farmyard', 'orchard'),
+      minzoom: 9,
       paint: { 'fill-color': C.farmland, 'fill-opacity': 0.55 },
     },
     {
@@ -161,6 +174,7 @@ export function mapStyle(tilesUrl: string): StyleSpecification {
       source: src,
       'source-layer': 'landuse',
       filter: kindIs('beach', 'sand', 'bare_rock'),
+      minzoom: 9,
       paint: { 'fill-color': C.beach, 'fill-opacity': 0.9 },
     },
     {
@@ -169,6 +183,7 @@ export function mapStyle(tilesUrl: string): StyleSpecification {
       source: src,
       'source-layer': 'landuse',
       filter: kindIs('wetland'),
+      minzoom: 8,
       paint: { 'fill-color': C.wetland, 'fill-opacity': 0.75 },
     },
     {
@@ -177,6 +192,7 @@ export function mapStyle(tilesUrl: string): StyleSpecification {
       source: src,
       'source-layer': 'landuse',
       filter: kindIs('commercial', 'industrial', 'residential', 'university', 'college', 'school', 'hospital'),
+      minzoom: 9,
       paint: { 'fill-color': C.urban, 'fill-opacity': 0.5 },
     },
     {
@@ -185,6 +201,7 @@ export function mapStyle(tilesUrl: string): StyleSpecification {
       source: src,
       'source-layer': 'landuse',
       filter: kindIs('pedestrian', 'footway'),
+      minzoom: 12,
       paint: { 'fill-color': '#EDE8DC', 'fill-opacity': 0.85 },
     },
 

@@ -15,6 +15,10 @@ export interface Line {
   name: string;
   color: string;
   stationIds: string[];
+  /** Rolling stock ID from the catalogue (optional). */
+  rollingStockId?: string;
+  /** Number of train units assigned to this line. */
+  trainCount?: number;
 }
 
 export interface NetworkData {
@@ -194,6 +198,22 @@ export class Network {
     const l = this.lines.find((l) => l.id === id);
     if (l) {
       l.color = color;
+      this._emit();
+    }
+  }
+
+  setLineTrain(id: string, rollingStockId: string | undefined, trainCount?: number): void {
+    const l = this.lines.find((l) => l.id === id);
+    if (!l) return;
+    l.rollingStockId = rollingStockId;
+    l.trainCount = rollingStockId ? (trainCount ?? l.trainCount ?? 1) : undefined;
+    this._emit();
+  }
+
+  setLineTrainCount(id: string, count: number): void {
+    const l = this.lines.find((l) => l.id === id);
+    if (l) {
+      l.trainCount = Math.max(0, Math.round(count));
       this._emit();
     }
   }

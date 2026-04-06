@@ -11,6 +11,8 @@ import { LINE_COLORS } from './network';
 import type { NetworkExport } from './network';
 import { validateNetworkExport } from './network';
 import { fetchCatchmentStats, preloadLsoa, fetchLineCatchmentStats } from './station-manager';
+import { ROLLING_STOCK, ROLLING_STOCK_CATEGORIES, getRollingStock, computeLineStats } from './rolling-stock';
+import type { RollingStock } from './rolling-stock';
 
 // Register the PMTiles custom protocol so MapLibre can load .pmtiles files
 // via HTTP range-requests from a single static file.
@@ -343,6 +345,129 @@ map.on('load', () => {
     });
   }
 
+  // ── Rolling stock helpers ───────────────────────────────────────────────
+
+  function renderTrainCard(stock: RollingStock): void {
+    document.getElementById('lm-train-flag')!.textContent = stock.flag;
+    document.getElementById('lm-train-card-name')!.textContent = `${stock.designation} ${stock.name}`;
+    document.getElementById('lm-train-card-sub')!.textContent = `${stock.manufacturer} · ${stock.country}`;
+    document.getElementById('lm-ts-speed')!.textContent = `${stock.maxSpeedKmh} km/h`;
+    document.getElementById('lm-ts-accel')!.textContent = `${stock.accelerationMs2} m/s²`;
+    document.getElementById('lm-ts-cap')!.textContent = stock.totalCapacity.toLocaleString('en-GB');
+    document.getElementById('lm-ts-cost')!.textContent = `£${stock.costMillionGbp}M`;
+    document.getElementById('lm-ts-cars')!.textContent = `${stock.carsPerUnit}`;
+    document.getElementById('lm-ts-length')!.textContent = `${stock.lengthM} m`;
+    document.getElementById('lm-train-funfact')!.textContent = stock.funFact;
+  }
+
+  function renderLmTrain(lineId: string): void {
+    const line = editor.network.getLine(lineId);
+    if (!line) return;
+    const selector = document.getElementById('lm-train-selector')!;
+    const info = document.getElementById('lm-train-info')!;
+    const countInput = document.getElementById('lm-train-count') as HTMLInputElement;
+
+    if (line.rollingStockId) {
+      const stock = getRollingStock(line.rollingStockId);
+      if (stock) {
+        selector.style.display = 'none';
+        info.classList.remove('hidden');
+        renderTrainCard(stock);
+        countInput.value = String(line.trainCount ?? 1);
+        refreshLineStats(lineId);
+        return;
+      }
+    }
+    selector.style.display = '';
+    info.classList.add('hidden');
+    document.getElementById('lm-line-stats')!.classList.add('hidden');
+  }
+
+  function refreshLineStats(lineId: string): void {
+    const line = editor.network.getLine(lineId);
+    if (!line?.rollingStockId) {
+      document.getElementById('lm-line-stats')!.classList.add('hidden');
+      return;
+    }
+    const stock = getRollingStock(line.rollingStockId);
+    if (!stock) return;
+
+    const stations = line.stationIds
+      .map((id) => editor.network.getStation(id))
+      .filter((s): s is NonNullable<typeof s> => !!s);
+
+    if (stations.length < 2) {
+      document.getElementById('lm-line-stats')!.classList.add('hidden');
+      return;
+    }
+
+    const stats = computeLineStats(stations, stock, line.trainCount ?? 1);
+    const el = document.getElementById('lm-line-stats')!;
+    el.classList.remove('hidden');
+
+    document.getElementById('lm-ls-distance')!.textContent = `${stats.totalDistanceKm.toFixed(1)} km`;
+    document.getElementById('lm-ls-time')!.textContent = `${Math.round(stats.totalTimeMin)} min`;
+    document.getElementById('lm-ls-totalcost')!.textContent = `£${stats.totalCostM.toFixed(1)}M`;
+    document.getElementById('lm-ls-capacity')!.textContent = stats.totalCapacity.toLocaleString('en-GB');
+    document.getElementById('lm-ls-tph')!.textContent = `${stats.trainsPerHour}`;
+    document.getElementById('lm-ls-pax')!.textContent = stats.passengersThroughput.toLocaleString('en-GB');
+  }
+
+  function openTrainPicker(lineId: string): void {
+    const modal = document.getElementById('train-picker-modal')!;
+    const list = document.getElementById('train-picker-list')!;
+    list.innerHTML = '';
+
+    let currentCategory = '';
+    for (const cat of ROLLING_STOCK_CATEGORIES) {
+      const trains = ROLLING_STOCK.filter((t) => t.category === cat);
+      if (trains.length === 0) continue;
+      if (cat !== currentCategory) {
+        currentCategory = cat;
+        const heading = document.createElement('div');
+        heading.className = 'train-picker-category';
+        heading.textContent = cat;
+        list.appendChild(heading);
+      }
+      for (const train of trains) {
+        const item = document.createElement('div');
+        item.className = 'train-picker-item';
+
+        item.innerHTML = `
+          <span class="train-picker-flag">${train.flag}</span>
+          <div class="train-picker-info">
+            <div class="train-picker-name">${train.designation} ${train.name}</div>
+            <div class="train-picker-sub">${train.manufacturer}</div>
+          </div>
+          <div class="train-picker-stats">
+            <div class="train-picker-stat">
+              <div class="train-picker-stat-val">${train.maxSpeedKmh}</div>
+              <div class="train-picker-stat-lbl">km/h</div>
+            </div>
+            <div class="train-picker-stat">
+              <div class="train-picker-stat-val">${train.totalCapacity.toLocaleString('en-GB')}</div>
+              <div class="train-picker-stat-lbl">pax</div>
+            </div>
+            <div class="train-picker-stat">
+              <div class="train-picker-stat-val">£${train.costMillionGbp}M</div>
+              <div class="train-picker-stat-lbl">cost</div>
+            </div>
+          </div>
+        `;
+
+        item.addEventListener('click', () => {
+          editor.network.setLineTrain(lineId, train.id, 1);
+          modal.classList.add('hidden');
+          renderLmTrain(lineId);
+        });
+
+        list.appendChild(item);
+      }
+    }
+
+    modal.classList.remove('hidden');
+  }
+
   function openLineManager(lineId: string): void {
     const line = editor.network.getLine(lineId);
     if (!line) return;
@@ -355,6 +480,7 @@ map.on('load', () => {
     renderLmHeader(lineId);
     renderLmSwatches(lineId);
     renderLmStops(lineId);
+    renderLmTrain(lineId);
 
     // Fetch census stats only on first open or when stops changed
     const sig = line.stationIds.join(',');
@@ -500,6 +626,7 @@ map.on('load', () => {
         if (sig !== openLineStopSig) {
           openLineStopSig = sig;
           refreshLmStats(openLineId);
+          refreshLineStats(openLineId);
         }
       }
     }
@@ -658,6 +785,58 @@ map.on('load', () => {
     const lid = openLineId;
     closeLineManager();
     editor.deleteLine(lid);
+  });
+
+  // ── Rolling stock wiring ──────────────────────────────────────────────
+
+  document.getElementById('lm-train-pick')!.addEventListener('click', () => {
+    if (openLineId) openTrainPicker(openLineId);
+  });
+
+  document.getElementById('lm-train-remove')!.addEventListener('click', () => {
+    if (!openLineId) return;
+    editor.network.setLineTrain(openLineId, undefined);
+    renderLmTrain(openLineId);
+  });
+
+  const trainCountInput = document.getElementById('lm-train-count') as HTMLInputElement;
+
+  document.getElementById('lm-train-dec')!.addEventListener('click', () => {
+    if (!openLineId) return;
+    const line = editor.network.getLine(openLineId);
+    if (!line) return;
+    const newCount = Math.max(0, (line.trainCount ?? 1) - 1);
+    editor.network.setLineTrainCount(openLineId, newCount);
+    trainCountInput.value = String(newCount);
+    refreshLineStats(openLineId);
+  });
+
+  document.getElementById('lm-train-inc')!.addEventListener('click', () => {
+    if (!openLineId) return;
+    const line = editor.network.getLine(openLineId);
+    if (!line) return;
+    const newCount = Math.min(200, (line.trainCount ?? 1) + 1);
+    editor.network.setLineTrainCount(openLineId, newCount);
+    trainCountInput.value = String(newCount);
+    refreshLineStats(openLineId);
+  });
+
+  trainCountInput.addEventListener('change', () => {
+    if (!openLineId) return;
+    const val = Math.max(0, Math.min(200, parseInt(trainCountInput.value, 10) || 0));
+    editor.network.setLineTrainCount(openLineId, val);
+    trainCountInput.value = String(val);
+    refreshLineStats(openLineId);
+  });
+
+  // Train picker modal cancel / backdrop close
+  document.getElementById('train-picker-cancel')!.addEventListener('click', () => {
+    document.getElementById('train-picker-modal')!.classList.add('hidden');
+  });
+  document.getElementById('train-picker-modal')!.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) {
+      document.getElementById('train-picker-modal')!.classList.add('hidden');
+    }
   });
 
   // Color swatches for new line

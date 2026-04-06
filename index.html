@@ -301,6 +301,61 @@
 
           <div class="sm-divider"></div>
 
+          <!-- Rolling stock section -->
+          <div class="sm-section">
+            <div class="sm-section-label">Rolling Stock</div>
+            <div id="lm-train-selector">
+              <button id="lm-train-pick" class="lm-train-pick-btn">Choose a train…</button>
+            </div>
+            <div id="lm-train-info" class="hidden">
+              <div id="lm-train-card">
+                <div id="lm-train-card-header">
+                  <span id="lm-train-flag"></span>
+                  <div id="lm-train-card-titles">
+                    <div id="lm-train-card-name"></div>
+                    <div id="lm-train-card-sub"></div>
+                  </div>
+                  <button id="lm-train-remove" class="lm-train-remove-btn" title="Remove train">×</button>
+                </div>
+                <div id="lm-train-specs">
+                  <div class="lm-train-spec"><span class="lm-train-spec-val" id="lm-ts-speed"></span><span class="lm-train-spec-lbl">Max speed</span></div>
+                  <div class="lm-train-spec"><span class="lm-train-spec-val" id="lm-ts-accel"></span><span class="lm-train-spec-lbl">Accel.</span></div>
+                  <div class="lm-train-spec"><span class="lm-train-spec-val" id="lm-ts-cap"></span><span class="lm-train-spec-lbl">Capacity</span></div>
+                  <div class="lm-train-spec"><span class="lm-train-spec-val" id="lm-ts-cost"></span><span class="lm-train-spec-lbl">Cost / unit</span></div>
+                  <div class="lm-train-spec"><span class="lm-train-spec-val" id="lm-ts-cars"></span><span class="lm-train-spec-lbl">Cars</span></div>
+                  <div class="lm-train-spec"><span class="lm-train-spec-val" id="lm-ts-length"></span><span class="lm-train-spec-lbl">Length</span></div>
+                </div>
+                <div id="lm-train-funfact"></div>
+              </div>
+
+              <div id="lm-train-count-row">
+                <label for="lm-train-count">Units on line</label>
+                <div class="lm-train-count-ctl">
+                  <button id="lm-train-dec" class="lm-train-count-btn">−</button>
+                  <input id="lm-train-count" type="number" min="0" max="200" value="1" />
+                  <button id="lm-train-inc" class="lm-train-count-btn">+</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="sm-divider"></div>
+
+          <!-- Line stats (computed from rolling stock + stops) -->
+          <div id="lm-line-stats" class="sm-section hidden">
+            <div class="sm-section-label">Line Statistics</div>
+            <div id="lm-line-stats-grid">
+              <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-distance">—</div><div class="sm-stat-label">Distance</div></div>
+              <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-time">—</div><div class="sm-stat-label">End-to-end</div></div>
+              <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-totalcost">—</div><div class="sm-stat-label">Fleet cost</div></div>
+              <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-capacity">—</div><div class="sm-stat-label">Total seats</div></div>
+              <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-tph">—</div><div class="sm-stat-label">Trains / hr</div></div>
+              <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-pax">—</div><div class="sm-stat-label">Pax / hr</div></div>
+            </div>
+          </div>
+
+          <div class="sm-divider"></div>
+
           <!-- Stop list -->
           <div class="sm-section">
             <div class="sm-section-label">Stops <span id="lm-stop-count" class="sm-section-sub"></span></div>
@@ -338,6 +393,17 @@
           <button id="import-btn-replace" class="modal-btn modal-btn--danger">Replace all</button>
           <button id="import-btn-merge" class="modal-btn modal-btn--primary">Add on top</button>
           <button id="import-btn-cancel" class="modal-btn modal-btn--secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Train picker modal -->
+    <div id="train-picker-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="train-picker-title">
+      <div class="modal-box train-picker-box">
+        <div class="modal-title" id="train-picker-title">Choose Rolling Stock</div>
+        <div id="train-picker-list"></div>
+        <div class="modal-actions">
+          <button id="train-picker-cancel" class="modal-btn modal-btn--secondary">Cancel</button>
         </div>
       </div>
     </div>
