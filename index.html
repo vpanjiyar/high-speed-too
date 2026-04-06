@@ -38,6 +38,13 @@
               <path d="M3 20h18"/>
             </svg>
           </button>
+          <div class="history-sep"></div>
+          <button id="btn-export" class="history-btn" title="Export transit map">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <path d="M8 12h8M12 8l4 4-4 4"/>
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -404,6 +411,52 @@
         <div id="train-picker-list"></div>
         <div class="modal-actions">
           <button id="train-picker-cancel" class="modal-btn modal-btn--secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export modal -->
+    <div id="export-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="export-modal-title">
+      <div class="modal-box export-modal-box">
+        <div class="modal-title" id="export-modal-title">Export Transit Map</div>
+
+        <!-- Step 1: Line selection -->
+        <div id="export-step-lines" class="export-step">
+          <p class="modal-text">Select lines to include in the export:</p>
+          <div id="export-line-list" class="export-line-list"></div>
+          <p id="export-no-lines" class="export-no-lines hidden">You need to create at least one line before exporting.</p>
+        </div>
+
+        <!-- Step 2: Style selection -->
+        <div id="export-step-style" class="export-step hidden">
+          <p class="modal-text">Choose a map style:</p>
+          <div class="export-style-options">
+            <label class="export-style-option">
+              <input type="radio" name="export-style" value="mta" checked />
+              <div class="export-style-card">
+                <div class="export-style-name">NY Metro (MTA)</div>
+                <div class="export-style-desc">Somewhat realistic map following MTA guidelines. Geographic routes with bullet stations.</div>
+              </div>
+            </label>
+            <label class="export-style-option">
+              <input type="radio" name="export-style" value="lu" />
+              <div class="export-style-card">
+                <div class="export-style-name">London Underground</div>
+                <div class="export-style-desc">Abstract schematic map following Beck's original rules. Octilinear lines with tick-mark stations.</div>
+              </div>
+            </label>
+          </div>
+          <label class="export-legend-toggle">
+            <input type="checkbox" id="export-show-legend" checked />
+            <span>Show key / legend</span>
+          </label>
+        </div>
+
+        <div class="modal-actions">
+          <button id="export-btn-back" class="modal-btn modal-btn--secondary" style="display:none">Back</button>
+          <button id="export-btn-next" class="modal-btn modal-btn--primary">Next</button>
+          <button id="export-btn-export" class="modal-btn modal-btn--primary" style="display:none">Export</button>
+          <button id="export-btn-cancel" class="modal-btn modal-btn--secondary">Cancel</button>
         </div>
       </div>
     </div>

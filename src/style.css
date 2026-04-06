@@ -1667,3 +1667,140 @@ html, body {
   letter-spacing: 0.3px;
 }
 
+/* ── Export modal ──────────────────────────────────────────────────────────── */
+
+.export-modal-box {
+  max-width: 420px;
+}
+
+.export-step.hidden {
+  display: none;
+}
+
+.export-line-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.export-line-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
+  user-select: none;
+}
+
+.export-line-item:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.export-line-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #1a1a2e;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.export-line-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.export-line-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1a1a2e;
+  flex: 1;
+}
+
+.export-line-stops {
+  font-size: 11px;
+  color: #888;
+}
+
+.export-no-lines {
+  font-size: 13px;
+  color: #c0392b;
+  text-align: center;
+  padding: 18px 0;
+}
+
+.export-no-lines.hidden {
+  display: none;
+}
+
+.export-style-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.export-style-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1.5px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.export-style-option:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.export-style-option:has(input:checked) {
+  border-color: #1a1a2e;
+  background: rgba(26, 26, 46, 0.04);
+}
+
+.export-style-option input[type="radio"] {
+  margin-top: 3px;
+  accent-color: #1a1a2e;
+  cursor: pointer;
+}
+
+.export-style-card {
+  flex: 1;
+}
+
+.export-style-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1a2e;
+  margin-bottom: 2px;
+}
+
+.export-style-desc {
+  font-size: 12px;
+  color: #666;
+  line-height: 1.4;
+}
+
+.export-legend-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #444;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.export-legend-toggle input[type="checkbox"] {
+  accent-color: #1a1a2e;
+  cursor: pointer;
+}
+

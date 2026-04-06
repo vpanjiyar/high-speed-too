@@ -13,6 +13,8 @@ import { validateNetworkExport } from './network';
 import { fetchCatchmentStats, preloadLsoa, fetchLineCatchmentStats } from './station-manager';
 import { ROLLING_STOCK, ROLLING_STOCK_CATEGORIES, getRollingStock, computeLineStats } from './rolling-stock';
 import type { RollingStock } from './rolling-stock';
+import { openExportPage } from './map-export';
+import type { ExportStyle } from './map-export';
 
 // Register the PMTiles custom protocol so MapLibre can load .pmtiles files
 // via HTTP range-requests from a single static file.
@@ -991,6 +993,114 @@ map.on('load', () => {
       alert('Failed to read the file.');
     });
   });
+
+  // ── Export ──────────────────────────────────────────────────────────────
+
+  const exportModal = document.getElementById('export-modal')!;
+  const exportStepLines = document.getElementById('export-step-lines')!;
+  const exportStepStyle = document.getElementById('export-step-style')!;
+  const exportBtnNext = document.getElementById('export-btn-next')!;
+  const exportBtnBack = document.getElementById('export-btn-back')!;
+  const exportBtnExport = document.getElementById('export-btn-export')!;
+  const exportBtnCancel = document.getElementById('export-btn-cancel')!;
+  const exportLineList = document.getElementById('export-line-list')!;
+  const exportNoLines = document.getElementById('export-no-lines')!;
+
+  function openExportModal(): void {
+    exportStepLines.classList.remove('hidden');
+    exportStepStyle.classList.add('hidden');
+    exportBtnNext.style.display = '';
+    exportBtnBack.style.display = 'none';
+    exportBtnExport.style.display = 'none';
+
+    // Populate line list
+    exportLineList.innerHTML = '';
+    const lines = editor.network.lines;
+
+    if (lines.length === 0) {
+      exportNoLines.classList.remove('hidden');
+      exportBtnNext.style.display = 'none';
+    } else {
+      exportNoLines.classList.add('hidden');
+      for (const line of lines) {
+        const item = document.createElement('label');
+        item.className = 'export-line-item';
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = true;
+        cb.value = line.id;
+
+        const dot = document.createElement('span');
+        dot.className = 'export-line-dot';
+        dot.style.background = line.color;
+
+        const name = document.createElement('span');
+        name.className = 'export-line-name';
+        name.textContent = line.name;
+
+        const stops = document.createElement('span');
+        stops.className = 'export-line-stops';
+        stops.textContent = `${line.stationIds.length} stops`;
+
+        item.appendChild(cb);
+        item.appendChild(dot);
+        item.appendChild(name);
+        item.appendChild(stops);
+        exportLineList.appendChild(item);
+      }
+    }
+
+    exportModal.classList.remove('hidden');
+  }
+
+  function closeExportModal(): void {
+    exportModal.classList.add('hidden');
+  }
+
+  function getSelectedExportLineIds(): string[] {
+    return Array.from(exportLineList.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked'))
+      .map((cb) => cb.value);
+  }
+
+  exportBtnNext.addEventListener('click', () => {
+    const selected = getSelectedExportLineIds();
+    if (selected.length === 0) {
+      alert('Please select at least one line to export.');
+      return;
+    }
+    exportStepLines.classList.add('hidden');
+    exportStepStyle.classList.remove('hidden');
+    exportBtnNext.style.display = 'none';
+    exportBtnBack.style.display = '';
+    exportBtnExport.style.display = '';
+  });
+
+  exportBtnBack.addEventListener('click', () => {
+    exportStepLines.classList.remove('hidden');
+    exportStepStyle.classList.add('hidden');
+    exportBtnNext.style.display = '';
+    exportBtnBack.style.display = 'none';
+    exportBtnExport.style.display = 'none';
+  });
+
+  exportBtnExport.addEventListener('click', () => {
+    const lineIds = getSelectedExportLineIds();
+    const styleRadio = document.querySelector<HTMLInputElement>('input[name="export-style"]:checked');
+    const style: ExportStyle = (styleRadio?.value as ExportStyle) || 'mta';
+    const showLegend = (document.getElementById('export-show-legend') as HTMLInputElement).checked;
+
+    closeExportModal();
+    openExportPage(editor.network, { style, lineIds, showLegend });
+  });
+
+  exportBtnCancel.addEventListener('click', closeExportModal);
+
+  exportModal.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeExportModal();
+  });
+
+  document.getElementById('btn-export')!.addEventListener('click', openExportModal);
 });
 
 function updateCensusUI(state: CensusOverlayState): void {
