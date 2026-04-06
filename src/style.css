@@ -32,11 +32,18 @@ html, body {
   z-index: 10;
 }
 
-#title-card {
-  pointer-events: auto;
+#top-left {
+  pointer-events: none;
   position: absolute;
   top: 16px;
   left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#title-card {
+  pointer-events: auto;
   background: rgba(255, 252, 244, 0.94);
   border: 1px solid rgba(0, 0, 0, 0.12);
   border-radius: 6px;
@@ -51,6 +58,168 @@ html, body {
   font-weight: 600;
   color: #1a1a2e;
   letter-spacing: 0.3px;
+}
+
+#history-controls {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(255, 252, 244, 0.94);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.history-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #1a1a2e;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, opacity 0.12s, transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.history-btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.07);
+}
+
+.history-btn:not(:disabled):active {
+  background: rgba(0, 0, 0, 0.09);
+  transform: scale(0.80);
+  transition: transform 0.06s ease-in, background 0.06s;
+}
+
+.history-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Rotation animation on click */
+#btn-undo.btn-animate svg {
+  animation: icon-rotate-ccw 0.38s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+#btn-redo.btn-animate svg {
+  animation: icon-rotate-cw 0.38s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes icon-rotate-ccw {
+  0%   { transform: rotate(0deg)   scale(1); }
+  35%  { transform: rotate(-32deg) scale(0.88); }
+  100% { transform: rotate(0deg)   scale(1); }
+}
+
+@keyframes icon-rotate-cw {
+  0%   { transform: rotate(0deg)   scale(1); }
+  35%  { transform: rotate(32deg)  scale(0.88); }
+  100% { transform: rotate(0deg)   scale(1); }
+}
+
+/* Visual separator between undo/redo and save/import */
+.history-sep {
+  width: 1px;
+  height: 18px;
+  background: rgba(0, 0, 0, 0.15);
+  margin: 0 3px;
+  flex-shrink: 0;
+}
+
+/* ── Import conflict modal ────────────────────────────────────────────────── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+
+.modal-backdrop.hidden {
+  display: none;
+}
+
+.modal-box {
+  background: #fffcf4;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 10px;
+  padding: 22px 24px 18px;
+  max-width: 340px;
+  width: calc(100vw - 40px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.22);
+}
+
+.modal-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin-bottom: 8px;
+}
+
+.modal-text {
+  font-size: 13.5px;
+  color: #444;
+  margin: 0 0 18px;
+  line-height: 1.5;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.modal-btn {
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.12s, opacity 0.12s;
+}
+
+.modal-btn--danger {
+  background: #c0392b;
+  color: #fff;
+  border-color: #a93226;
+}
+
+.modal-btn--danger:hover {
+  background: #a93226;
+}
+
+.modal-btn--primary {
+  background: #1a1a2e;
+  color: #fff;
+  border-color: #1a1a2e;
+}
+
+.modal-btn--primary:hover {
+  background: #2d2d50;
+}
+
+.modal-btn--secondary {
+  background: transparent;
+  color: #555;
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+.modal-btn--secondary:hover {
+  background: rgba(0, 0, 0, 0.06);
 }
 
 #no-tiles-warning {
@@ -79,6 +248,58 @@ html, body {
   font-size: 13px;
 }
 
+/* ── View toggle panel (top-right) ─────────────────────────────────────────── */
+
+#view-toggle {
+  pointer-events: auto;
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  background: rgba(255, 252, 244, 0.94);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  padding: 3px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  gap: 2px;
+}
+
+.view-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #555;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+
+.view-btn:hover:not(.view-btn--active) {
+  background: rgba(0, 0, 0, 0.06);
+  color: #1a1a2e;
+}
+
+.view-btn--active {
+  background: #1a1a2e;
+  color: #f4efe0;
+}
+
+/* Push MapLibre nav + compass controls below the view toggle */
+.maplibregl-ctrl-top-right {
+  top: 58px !important;
+}
+
 /* --- MapLibre control overrides (OS aesthetic) --- */
 .maplibregl-ctrl-group {
   background: rgba(255, 252, 244, 0.94) !important;
@@ -88,6 +309,17 @@ html, body {
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
   margin: 0 16px 12px 0 !important;
+}
+
+/* Navigation control (+/- and compass) laid out horizontally */
+.maplibregl-ctrl-group:has(button.maplibregl-ctrl-zoom-in) {
+  display: flex;
+  flex-direction: row;
+}
+
+.maplibregl-ctrl-group:has(button.maplibregl-ctrl-zoom-in) button + button {
+  border-top: none !important;
+  border-left: 1px solid rgba(0, 0, 0, 0.1) !important;
 }
 
 .maplibregl-ctrl-group button {
@@ -115,7 +347,7 @@ html, body {
 #zoom-links {
   pointer-events: auto;
   position: absolute;
-  bottom: 36px;  /* sits above the scale bar (~20px) + its 10px bottom margin */
+  bottom: 92px;  /* sits above: scale bar (~32px) + horizontal nav control (~48px) + gap */
   right: 16px;
   display: flex;
   align-items: center;
@@ -420,15 +652,22 @@ html, body {
 .tool-btn {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
+  gap: 6px;
+  padding: 8px 12px;
+  height: 40px;
   border: none;
-  border-radius: 4px;
+  border-radius: 5px;
   background: transparent;
   color: #1a1a2e;
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+
+.tool-btn-label {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
 }
 
 .tool-btn:hover {
@@ -445,9 +684,19 @@ html, body {
   color: #b91c1c;
 }
 
+.tool-btn--done {
+  color: #15803d;
+  display: none;
+}
+
+.tool-btn--done:hover {
+  background: rgba(21, 128, 61, 0.12);
+  color: #15803d;
+}
+
 .tool-separator {
   width: 1px;
-  height: 20px;
+  height: 28px;
   background: rgba(0, 0, 0, 0.12);
   margin: 0 2px;
 }
@@ -939,6 +1188,10 @@ html, body {
   flex-direction: column;
   z-index: 19; /* one below station manager so SM sits on top if they overlap */
   transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#import-file-input {
+  display: none;
 }
 
 #line-manager.hidden {

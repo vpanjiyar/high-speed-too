@@ -3,7 +3,7 @@
 
 import type { Map as MaplibreMap, MapMouseEvent } from 'maplibre-gl';
 import { Network } from './network';
-import type { Station } from './network';
+import type { Station, NetworkData } from './network';
 import { NetworkRenderer } from './network-renderer';
 
 export type EditorMode = 'select' | 'station' | 'line';
@@ -183,6 +183,52 @@ export class NetworkEditor {
     this._emit();
   }
 
+  /**
+   * Import a validated network payload.
+   * merge=false replaces everything; merge=true appends on top of existing data.
+   */
+  importNetwork(data: NetworkData, merge: boolean): void {
+    this.network.importNetwork(data, merge);
+    this.activeLineId = null;
+    this.selectedStationId = null;
+    this.renderer.setSelectedStation(null);
+    this.mode = 'select';
+    this._updateCursor();
+    this._emit();
+  }
+
+  // ── Undo / Redo ────────────────────────────────────────────────────────────
+
+  canUndo(): boolean { return this.network.canUndo(); }
+  canRedo(): boolean { return this.network.canRedo(); }
+
+  undo(): void {
+    this.network.undo();
+    this._sanitizeEditorState();
+    this._emit();
+  }
+
+  redo(): void {
+    this.network.redo();
+    this._sanitizeEditorState();
+    this._emit();
+  }
+
+  /** Drop references to stations/lines that no longer exist after undo/redo. */
+  private _sanitizeEditorState(): void {
+    if (this.selectedStationId && !this.network.getStation(this.selectedStationId)) {
+      this.selectedStationId = null;
+      this.renderer.setSelectedStation(null);
+    }
+    if (this.activeLineId && !this.network.getLine(this.activeLineId)) {
+      this.activeLineId = null;
+      if (this.mode === 'line') {
+        this.mode = 'select';
+        this._updateCursor();
+      }
+    }
+  }
+
   // ── Private ────────────────────────────────────────────────────────────────
 
   /**
@@ -238,11 +284,22 @@ export class NetworkEditor {
     const naptanHit = this._hitTestNaptan([e.point.x, e.point.y]);
 
     switch (this.mode) {
-      case 'select':
-        this.selectedStationId = networkStationId;
-        this.renderer.setSelectedStation(networkStationId);
+      case 'select': {
+        if (networkStationId) {
+          this.selectedStationId = networkStationId;
+          this.renderer.setSelectedStation(networkStationId);
+        } else {
+          const lineId = this.renderer.hitTestLine([e.point.x, e.point.y]);
+          if (lineId) {
+            this.setActiveLine(lineId);
+            return; // setActiveLine already calls _emit
+          }
+          this.selectedStationId = null;
+          this.renderer.setSelectedStation(null);
+        }
         this._emit();
         break;
+      }
 
       case 'station':
         if (networkStationId) {

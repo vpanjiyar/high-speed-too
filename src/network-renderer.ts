@@ -38,6 +38,23 @@ export class NetworkRenderer {
     this._updateStationSelection();
   }
 
+  /** Returns the line id at the given point, if any. Uses a padded bbox to
+   *  make clicking thin line segments easier. */
+  hitTestLine(point: [number, number]): string | null {
+    const pad = 6;
+    const bbox: [[number, number], [number, number]] = [
+      [point[0] - pad, point[1] - pad],
+      [point[0] + pad, point[1] + pad],
+    ];
+    const features = this.map.queryRenderedFeatures(bbox, {
+      layers: [LAYER_LINE_CASING],
+    });
+    if (features.length > 0) {
+      return (features[0].properties?.id as string) ?? null;
+    }
+    return null;
+  }
+
   /** Returns the station id at the given point, if any. Uses a small padded
    *  bbox so that clicking close to (but not pixel-perfect on) a circle dot
    *  still registers a hit. */

@@ -2,12 +2,14 @@
 import './style.css';
 import maplibregl from 'maplibre-gl';
 import { Protocol } from 'pmtiles';
-import { mapStyle } from './map-style';
+import { mapStyle, applySchematicMode } from './map-style';
 import { CensusOverlay, LEGEND_CONFIGS } from './census-overlay';
 import type { CensusMetric, CensusOverlayState } from './census-overlay';
 import { NetworkEditor } from './network-editor';
 import type { EditorState } from './network-editor';
 import { LINE_COLORS } from './network';
+import type { NetworkExport } from './network';
+import { validateNetworkExport } from './network';
 import { fetchCatchmentStats, preloadLsoa, fetchLineCatchmentStats } from './station-manager';
 
 // Register the PMTiles custom protocol so MapLibre can load .pmtiles files
@@ -46,7 +48,7 @@ map.on('error', (e) => {
 
 map.addControl(
   new maplibregl.NavigationControl({ showCompass: true, visualizePitch: false }),
-  'top-right',
+  'bottom-right',
 );
 map.addControl(
   new maplibregl.ScaleControl({ maxWidth: 160, unit: 'metric' }),
@@ -162,6 +164,27 @@ map.on('load', () => {
     radio.addEventListener('change', () => {
       overlay.setMetric(radio.value as CensusMetric);
     });
+  });
+
+  // ── View toggle (Detailed / Schematic) ─────────────────────────────────
+  let schematicMode = false;
+  const btnDetailed   = document.getElementById('view-btn-detailed')!;
+  const btnSchematic  = document.getElementById('view-btn-schematic')!;
+
+  btnSchematic.addEventListener('click', () => {
+    if (schematicMode) return;
+    schematicMode = true;
+    applySchematicMode(map, true);
+    btnSchematic.classList.add('view-btn--active');
+    btnDetailed.classList.remove('view-btn--active');
+  });
+
+  btnDetailed.addEventListener('click', () => {
+    if (!schematicMode) return;
+    schematicMode = false;
+    applySchematicMode(map, false);
+    btnDetailed.classList.add('view-btn--active');
+    btnSchematic.classList.remove('view-btn--active');
   });
 
   // ── Network editor ──────────────────────────────────────────────────────
@@ -438,8 +461,17 @@ map.on('load', () => {
       btn.classList.toggle('active', btn.id.replace('tool-', '') === state.mode);
     });
 
+    const doneBtn = document.getElementById('tool-done') as HTMLElement | null;
+    if (doneBtn) doneBtn.style.display = (state.mode === 'station' || state.mode === 'line') ? '' : 'none';
+
     const linePanel = document.getElementById('line-panel')!;
     linePanel.classList.toggle('hidden', state.mode !== 'line');
+
+    // Undo / redo button state
+    const undoBtn = document.getElementById('btn-undo') as HTMLButtonElement | null;
+    const redoBtn = document.getElementById('btn-redo') as HTMLButtonElement | null;
+    if (undoBtn) undoBtn.disabled = !editor.canUndo();
+    if (redoBtn) redoBtn.disabled = !editor.canRedo();
 
     // Station manager
     if (state.selectedStationId) {
@@ -543,6 +575,12 @@ map.on('load', () => {
         }
       }
     });
+  });
+
+  // Done button (exits station/line mode back to select)
+  document.getElementById('tool-done')!.addEventListener('click', () => {
+    editor.setMode('select');
+    document.getElementById('line-panel')!.classList.add('hidden');
   });
 
   // Clear button
@@ -653,6 +691,127 @@ map.on('load', () => {
 
   // Trigger initial UI sync now that editor is fully constructed and assigned
   editor.syncUI();
+
+  // ── Undo / Redo ─────────────────────────────────────────────────────────
+  function animateHistoryBtn(id: string): void {
+    const btn = document.getElementById(id)!;
+    btn.classList.remove('btn-animate');
+    void (btn as HTMLElement).offsetWidth; // reflow to restart animation
+    btn.classList.add('btn-animate');
+    btn.addEventListener('animationend', () => btn.classList.remove('btn-animate'), { once: true });
+  }
+
+  document.getElementById('btn-undo')!.addEventListener('click', () => { animateHistoryBtn('btn-undo'); editor.undo(); });
+  document.getElementById('btn-redo')!.addEventListener('click', () => { animateHistoryBtn('btn-redo'); editor.redo(); });
+
+  document.addEventListener('keydown', (e) => {
+    // Don't fire when the user is typing in a text field
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+    const platformMod = e.metaKey || e.ctrlKey;
+    if (!platformMod) return;
+
+    if (e.key === 'z' || e.key === 'Z') {
+      e.preventDefault();
+      editor.undo();
+    } else if (e.key === 'r' || e.key === 'R') {
+      e.preventDefault();
+      editor.redo();
+    }
+  });
+
+  // ── Save (download) ────────────────────────────────────────────────────
+
+  document.getElementById('btn-save')!.addEventListener('click', () => {
+    const payload: NetworkExport = editor.network.exportNetwork();
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `high-speed-too-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  // ── Import ─────────────────────────────────────────────────────────────
+
+  // Pending import data, held while the conflict modal is open.
+  let _pendingImport: NetworkExport | null = null;
+
+  function executeImport(merge: boolean): void {
+    if (!_pendingImport) return;
+    const data = _pendingImport;
+    _pendingImport = null;
+    document.getElementById('import-modal')!.classList.add('hidden');
+    closeLineManager();
+    closeStationManager();
+    editor.importNetwork(data.network, merge);
+  }
+
+  function openImportModal(payload: NetworkExport): void {
+    _pendingImport = payload;
+    document.getElementById('import-modal')!.classList.remove('hidden');
+  }
+
+  function closeImportModal(): void {
+    _pendingImport = null;
+    document.getElementById('import-modal')!.classList.add('hidden');
+  }
+
+  document.getElementById('import-btn-replace')!.addEventListener('click', () => {
+    executeImport(false);
+  });
+
+  document.getElementById('import-btn-merge')!.addEventListener('click', () => {
+    executeImport(true);
+  });
+
+  document.getElementById('import-btn-cancel')!.addEventListener('click', () => {
+    closeImportModal();
+  });
+
+  // Close modal on backdrop click
+  document.getElementById('import-modal')!.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeImportModal();
+  });
+
+  document.getElementById('btn-import')!.addEventListener('click', () => {
+    (document.getElementById('import-file-input') as HTMLInputElement).click();
+  });
+
+  document.getElementById('import-file-input')!.addEventListener('change', (e) => {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = ''; // reset so same file can be re-imported
+    if (!file) return;
+
+    file.text().then((text) => {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(text);
+      } catch {
+        alert('Could not read the file: not valid JSON.');
+        return;
+      }
+
+      if (!validateNetworkExport(raw)) {
+        alert('This does not appear to be a High Speed Too network file.');
+        return;
+      }
+
+      const hasData = editor.network.stations.length > 0 || editor.network.lines.length > 0;
+      if (hasData) {
+        openImportModal(raw);
+      } else {
+        closeLineManager();
+        closeStationManager();
+        editor.importNetwork(raw.network, false);
+      }
+    }).catch(() => {
+      alert('Failed to read the file.');
+    });
+  });
 });
 
 function updateCensusUI(state: CensusOverlayState): void {

@@ -22,6 +22,39 @@ export interface NetworkData {
   lines: Line[];
 }
 
+// ── File export / import ──────────────────────────────────────────────────────
+
+export interface NetworkExport {
+  appId: 'high-speed-too';
+  version: 1;
+  exportedAt: string;
+  network: NetworkData;
+}
+
+/** Type-guard: returns true if `raw` is a well-formed NetworkExport. */
+export function validateNetworkExport(raw: unknown): raw is NetworkExport {
+  if (typeof raw !== 'object' || raw === null) return false;
+  const d = raw as Record<string, unknown>;
+  if (d['appId'] !== 'high-speed-too') return false;
+  if (typeof d['version'] !== 'number') return false;
+  if (typeof d['network'] !== 'object' || d['network'] === null) return false;
+  const net = d['network'] as Record<string, unknown>;
+  if (!Array.isArray(net['stations']) || !Array.isArray(net['lines'])) return false;
+  for (const s of net['stations'] as unknown[]) {
+    if (typeof s !== 'object' || s === null) return false;
+    const stn = s as Record<string, unknown>;
+    if (typeof stn['id'] !== 'string' || typeof stn['name'] !== 'string') return false;
+    if (typeof stn['lng'] !== 'number' || typeof stn['lat'] !== 'number') return false;
+  }
+  for (const l of net['lines'] as unknown[]) {
+    if (typeof l !== 'object' || l === null) return false;
+    const ln = l as Record<string, unknown>;
+    if (typeof ln['id'] !== 'string' || typeof ln['name'] !== 'string') return false;
+    if (typeof ln['color'] !== 'string' || !Array.isArray(ln['stationIds'])) return false;
+  }
+  return true;
+}
+
 // ── Mini Metro–inspired palette ──────────────────────────────────────────────
 export const LINE_COLORS = [
   '#E53935', // red
@@ -50,6 +83,44 @@ export class Network {
   lines: Line[] = [];
 
   private listeners = new Set<() => void>();
+
+  // ── History (undo / redo) ──────────────────────────────────────────────────
+
+  private _history: NetworkData[] = [];
+  private _historyIndex = -1;
+  private _inHistoryOp = false;
+
+  private _snapshot(): NetworkData {
+    return {
+      stations: JSON.parse(JSON.stringify(this.stations)),
+      lines: JSON.parse(JSON.stringify(this.lines)),
+    };
+  }
+
+  canUndo(): boolean { return this._historyIndex > 0; }
+  canRedo(): boolean { return this._historyIndex < this._history.length - 1; }
+
+  undo(): void {
+    if (!this.canUndo()) return;
+    this._historyIndex--;
+    const snap = this._history[this._historyIndex];
+    this.stations = JSON.parse(JSON.stringify(snap.stations));
+    this.lines = JSON.parse(JSON.stringify(snap.lines));
+    this._inHistoryOp = true;
+    this._emit();
+    this._inHistoryOp = false;
+  }
+
+  redo(): void {
+    if (!this.canRedo()) return;
+    this._historyIndex++;
+    const snap = this._history[this._historyIndex];
+    this.stations = JSON.parse(JSON.stringify(snap.stations));
+    this.lines = JSON.parse(JSON.stringify(snap.lines));
+    this._inHistoryOp = true;
+    this._emit();
+    this._inHistoryOp = false;
+  }
 
   // ── Stations ───────────────────────────────────────────────────────────────
 
@@ -153,6 +224,46 @@ export class Network {
     return LINE_COLORS.find((c) => !used.has(c)) ?? LINE_COLORS[this.lines.length % LINE_COLORS.length];
   }
 
+  // ── File export / import ──────────────────────────────────────────────────
+
+  /** Returns the current network wrapped in a versioned export envelope. */
+  exportNetwork(): NetworkExport {
+    return {
+      appId: 'high-speed-too',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      network: this._snapshot(),
+    };
+  }
+
+  /**
+   * Load from a validated import envelope.
+   * - merge=false: replaces everything (stations + lines) with the imported data.
+   * - merge=true: remaps imported IDs to fresh ones and appends to the existing
+   *   network so nothing is overwritten.
+   */
+  importNetwork(data: NetworkData, merge: boolean): void {
+    if (!merge) {
+      this.stations = JSON.parse(JSON.stringify(data.stations));
+      this.lines = JSON.parse(JSON.stringify(data.lines));
+    } else {
+      const idMap = new Map<string, string>();
+      for (const s of data.stations) {
+        const newId = generateId('stn');
+        idMap.set(s.id, newId);
+        this.stations.push({ ...s, id: newId });
+      }
+      for (const l of data.lines) {
+        this.lines.push({
+          ...l,
+          id: generateId('line'),
+          stationIds: l.stationIds.map((sid) => idMap.get(sid) ?? sid),
+        });
+      }
+    }
+    this._emit();
+  }
+
   // ── Persistence ────────────────────────────────────────────────────────────
 
   save(): void {
@@ -189,6 +300,17 @@ export class Network {
 
   private _emit(): void {
     this.save();
+    if (!this._inHistoryOp) {
+      // Truncate any undone "future" entries, then push the new state
+      this._history.splice(this._historyIndex + 1);
+      this._history.push(this._snapshot());
+      // Cap to 100 entries to bound memory use
+      const MAX_HISTORY = 100;
+      if (this._history.length > MAX_HISTORY) {
+        this._history.splice(0, this._history.length - MAX_HISTORY);
+      }
+      this._historyIndex = this._history.length - 1;
+    }
     for (const fn of this.listeners) fn();
   }
 }

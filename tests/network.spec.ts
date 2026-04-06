@@ -46,7 +46,8 @@ async function injectFakeNaptanStation(
 ) {
   await page.evaluate(
     ({ name, atco, lng, lat, layer }) => {
-      const map = (window as unknown as { __map: { queryRenderedFeatures: unknown; getLayer: unknown } }).__map;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const map = (window as unknown as { __map: { queryRenderedFeatures: (...args: any[]) => unknown[]; getLayer: (id: string) => unknown } }).__map;
       const origQRF = map.queryRenderedFeatures.bind(map);
       const origGetLayer = map.getLayer.bind(map);
 
@@ -80,7 +81,8 @@ async function injectFakeNaptanStation(
 /** Remove the monkey-patch so other tests are not affected. */
 async function removeNaptanPatch(page: import('@playwright/test').Page) {
   await page.evaluate(() => {
-    const map = (window as unknown as { __map: { queryRenderedFeatures: unknown; getLayer: unknown } }).__map;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const map = (window as unknown as { __map: { queryRenderedFeatures: (...args: any[]) => unknown[] } }).__map;
     // Simple reload-free cleanup: clear by reloading will happen between tests naturally.
     // For same-page cleanup we just replace with no-op returning [].
     map.queryRenderedFeatures = () => [];

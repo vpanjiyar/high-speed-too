@@ -8,8 +8,60 @@
   <body>
     <div id="map"></div>
     <div id="ui">
-      <div id="title-card">
-        <span id="title-text">High Speed Too</span>
+      <div id="top-left">
+        <div id="title-card">
+          <span id="title-text">High Speed Too</span>
+        </div>
+        <div id="history-controls">
+          <button id="btn-undo" class="history-btn" title="Undo (Ctrl+Z)" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+              <path d="M3 3v5h5"/>
+            </svg>
+          </button>
+          <button id="btn-redo" class="history-btn" title="Redo (Ctrl+R)" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+              <path d="M21 3v5h-5"/>
+            </svg>
+          </button>
+          <div class="history-sep"></div>
+          <button id="btn-save" class="history-btn" title="Save network to file">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3v13M5 13l7 7 7-7"/>
+              <path d="M3 20h18"/>
+            </svg>
+          </button>
+          <button id="btn-import" class="history-btn" title="Import network from file">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 21V8M5 11l7-7 7 7"/>
+              <path d="M3 20h18"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- View toggle — top right, above nav controls -->
+      <div id="view-toggle">
+        <button id="view-btn-detailed" class="view-btn view-btn--active" title="Detailed view">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="1" y="1" width="6" height="6" rx="1"/>
+            <rect x="9" y="1" width="6" height="6" rx="1"/>
+            <rect x="1" y="9" width="6" height="6" rx="1"/>
+            <rect x="9" y="9" width="6" height="6" rx="1"/>
+          </svg>
+          <span>Detailed</span>
+        </button>
+        <button id="view-btn-schematic" class="view-btn" title="Schematic view">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="3.5" cy="8" r="2"/>
+            <circle cx="12.5" cy="8" r="2"/>
+            <line x1="5.5" y1="8" x2="10.5" y2="8"/>
+            <circle cx="8" cy="3.5" r="2"/>
+            <line x1="8" y1="5.5" x2="8" y2="6"/>
+          </svg>
+          <span>Schematic</span>
+        </button>
       </div>
 
       <!-- Overlays panel -->
@@ -94,16 +146,24 @@
       <div id="network-toolbar">
         <button class="tool-btn active" id="tool-select" title="Select">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M3 1l10 6.5L8.5 9l-2 5.5L3 1z"/></svg>
+          <span class="tool-btn-label">Select</span>
         </button>
-        <button class="tool-btn" id="tool-station" title="Place Station">
+        <button class="tool-btn" id="tool-station" title="Add Station">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5"/><circle cx="8" cy="8" r="2" fill="currentColor"/></svg>
+          <span class="tool-btn-label">Station</span>
         </button>
         <button class="tool-btn" id="tool-line" title="Draw Line">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 13L8 5l5 8" stroke-linejoin="round"/><circle cx="3" cy="13" r="1.5" fill="currentColor"/><circle cx="8" cy="5" r="1.5" fill="currentColor"/><circle cx="13" cy="13" r="1.5" fill="currentColor"/></svg>
+          <span class="tool-btn-label">Line</span>
+        </button>
+        <button class="tool-btn tool-btn--done" id="tool-done" title="Finish editing">
+          <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,7.5 5.5,11.5 13,3"/></svg>
+          <span class="tool-btn-label">Done</span>
         </button>
         <div class="tool-separator"></div>
         <button class="tool-btn tool-btn--danger" id="tool-clear" title="Clear All">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+          <span class="tool-btn-label">Clear</span>
         </button>
       </div>
 
@@ -265,6 +325,23 @@
         <button class="zoom-link" data-zoom="14"   data-label="Street">Street</button>
       </div>
     </div>
+
+    <!-- Hidden file input for importing a network JSON -->
+    <input type="file" id="import-file-input" accept=".json,application/json" title="Import network JSON file" />
+
+    <!-- Import conflict modal -->
+    <div id="import-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="import-modal-title">
+      <div class="modal-box">
+        <div class="modal-title" id="import-modal-title">Import Network</div>
+        <p class="modal-text">There is already data on the map. What would you like to do?</p>
+        <div class="modal-actions">
+          <button id="import-btn-replace" class="modal-btn modal-btn--danger">Replace all</button>
+          <button id="import-btn-merge" class="modal-btn modal-btn--primary">Add on top</button>
+          <button id="import-btn-cancel" class="modal-btn modal-btn--secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

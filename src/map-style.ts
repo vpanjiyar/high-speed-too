@@ -1,4 +1,4 @@
-import type { StyleSpecification, LayerSpecification, ExpressionSpecification } from 'maplibre-gl';
+import type { StyleSpecification, LayerSpecification, ExpressionSpecification, Map as MaplibreMap } from 'maplibre-gl';
 
 // ── OS-inspired colour palette ───────────────────────────────────────────────
 const C = {
@@ -723,4 +723,79 @@ export function mapStyle(tilesUrl: string): StyleSpecification {
     },
     layers,
   };
+}
+
+// ── Schematic (Mini Metro) mode ───────────────────────────────────────────────
+// Hides all decorative geography and simplifies the base map to a clean
+// black-and-white outline — just coastline + city labels — so the user's
+// custom rail network reads like an abstract transit diagram.
+
+const SCHEMATIC_HIDDEN_LAYERS: string[] = [
+  // Landcover
+  'landcover-forest', 'landcover-grass',
+  // Landuse
+  'landuse-national-park', 'landuse-park', 'landuse-forest', 'landuse-grass',
+  'landuse-beach', 'landuse-wetland', 'landuse-urban', 'landuse-pedestrian',
+  // Water lines
+  'water-line',
+  // Buildings
+  'building-fill', 'building-outline',
+  // Water labels
+  'water-label-line', 'water-label-point',
+  // Non-transit POI — transit POIs stay under the "Stations" overlay toggle
+  'poi-landmark', 'poi-general',
+  // Minor place labels
+  'place-village',
+  // Sub-national boundaries
+  'boundary-region',
+  // NOTE: rail infrastructure and station layers (rail-overview-*, naptan-*, etc.)
+  // are deliberately excluded — they remain under the Overlays panel toggles in
+  // both detailed and schematic mode.
+];
+
+interface PaintTweak {
+  layerId: string;
+  property: string;
+  schematic: unknown;
+  detailed: unknown;
+}
+
+const SCHEMATIC_PAINT_TWEAKS: PaintTweak[] = [
+  // Background → off-white instead of ocean blue
+  { layerId: 'background',   property: 'background-color', schematic: '#EBEBEB', detailed: C.ocean },
+  // Land → pure white
+  { layerId: 'earth-fill',   property: 'fill-color',       schematic: '#FFFFFF', detailed: C.land  },
+  // Ocean / lakes → mid grey
+  { layerId: 'ocean-fill',   property: 'fill-color',       schematic: '#D4D4D4', detailed: C.ocean },
+  { layerId: 'water-fill',   property: 'fill-color',       schematic: '#D4D4D4', detailed: C.water },
+  // Country border → solid thin grey line
+  { layerId: 'boundary-country', property: 'line-color',   schematic: '#AAAAAA', detailed: C.boundary },
+  { layerId: 'boundary-country', property: 'line-opacity', schematic: 1,         detailed: 0.8 },
+  { layerId: 'boundary-country', property: 'line-width',
+    schematic: ['interpolate', ['linear'], ['zoom'], 3, 0.5, 6, 1, 12, 1.5],
+    detailed:  ['interpolate', ['linear'], ['zoom'], 3, 0.8, 8, 2, 12, 3],
+  },
+  // Place labels → greyscale
+  { layerId: 'place-country', property: 'text-color',      schematic: '#555555', detailed: '#1A1A2E' },
+  { layerId: 'place-country', property: 'text-halo-color', schematic: 'rgba(255,255,255,0.9)', detailed: 'rgba(255,252,244,0.8)' },
+  { layerId: 'place-region',  property: 'text-color',      schematic: '#888888', detailed: '#2A2A3E' },
+  { layerId: 'place-region',  property: 'text-halo-color', schematic: 'rgba(255,255,255,0.9)', detailed: 'rgba(255,252,244,0.8)' },
+  { layerId: 'place-city',    property: 'text-color',      schematic: '#222222', detailed: C.label  },
+  { layerId: 'place-city',    property: 'text-halo-color', schematic: 'rgba(255,255,255,0.9)', detailed: C.labelHalo },
+];
+
+/**
+ * Toggle the map between detailed (OS-style) and schematic (Mini Metro-style) views.
+ * All custom GeoJSON layers (user network, census) are unaffected.
+ */
+export function applySchematicMode(map: MaplibreMap, enabled: boolean): void {
+  const visibility = enabled ? 'none' : 'visible';
+  for (const id of SCHEMATIC_HIDDEN_LAYERS) {
+    if (!map.getLayer(id)) continue;
+    map.setLayoutProperty(id, 'visibility', visibility);
+  }
+  for (const tweak of SCHEMATIC_PAINT_TWEAKS) {
+    if (!map.getLayer(tweak.layerId)) continue;
+    map.setPaintProperty(tweak.layerId, tweak.property, enabled ? tweak.schematic : tweak.detailed);
+  }
 }

@@ -93,3 +93,20 @@ Copy `public/tiles/uk.pmtiles` into the same folder as the generated `dist/` ass
 
 Map data © [OpenStreetMap contributors](https://openstreetmap.org/copyright), ODbL.  
 Basemap tiles © [Protomaps](https://protomaps.com).
+
+## Acknowledgements
+
+This prototype relies on a blend of open data, UK government open datasets, and excellent open-source map tooling. The following table summarizes the main external assets used in the app and the place where they appear.
+
+| Asset | Used for | Provider | License / Terms | Learn more |
+| --- | --- | --- | --- | --- |
+| `public/tiles/uk.pmtiles` | Offline UK basemap vector tiles for the map background | Protomaps / OpenStreetMap | ODbL | https://build.protomaps.com / https://protomaps.com |
+| `public/data/lsoa_boundaries.geojson`, `public/data/msoa_boundaries.geojson` | Census overlay boundary polygons for local/regional choropleths | ONS Open Geography Portal | Open Government Licence v3.0 | https://geoportal.statistics.gov.uk/ |
+| `public/data/lsoa_census.json`, `public/data/msoa_census.json` | Census population and working-age population values for overlay metrics | NOMIS / ONS Census 2021 | Open Government Licence v3.0 | https://www.nomisweb.co.uk/sources/census_2021 |
+| `public/data/rail_lines.geojson` | UK national rail line geometry overlay | OpenStreetMap via Overpass API | ODbL | https://overpass-api.de/api/interpreter |
+| `public/data/stations.geojson` | NaPTAN station points used for snapping and station import | Department for Transport NaPTAN | Open Government Licence v3.0 | https://naptan.api.dft.gov.uk/v1/access-nodes?dataFormat=csv |
+| `maplibre-gl` | Web map rendering engine | MapLibre project | BSD | https://maplibre.org/ |
+| `pmtiles` / `pmtiles` CLI | PMTiles reading, custom protocol, and UK tile archive tooling | Protomaps | See Protomaps / PMTiles project | https://github.com/protomaps/go-pmtiles |
+| Remote glyph fonts | Map label fonts loaded from Protomaps hosted glyphs | Protomaps basemaps-assets | See Protomaps assets | https://protomaps.github.io/basemaps-assets |
+
+> Thanks to the open-data community, the Office for National Statistics, the Department for Transport, OpenStreetMap contributors, Protomaps, and the MapLibre project for making this experimental UK transport sandbox possible.
