@@ -963,6 +963,72 @@ test('line manager shows end-to-end and between-stop timings for selected rollin
   await expect(page.locator('.lm-stop-time-tag').first()).not.toHaveText('');
 });
 
+test('line timing model accounts for acceleration on short hops', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  const times = await page.evaluate(async () => {
+    const rollingStockModule = await import('/src/rolling-stock.ts');
+    const metro = rollingStockModule.getRollingStock('lu-2024-stock');
+    const highSpeed = rollingStockModule.getRollingStock('tgv-duplex');
+    if (!metro || !highSpeed) return null;
+
+    const stations = [
+      { lng: -0.1, lat: 51.5, name: 'A' },
+      { lng: -0.0996, lat: 51.5002, name: 'B' },
+    ];
+
+    return {
+      metro: rollingStockModule.computeLineStats(stations, metro, 1).totalTimeMin,
+      highSpeed: rollingStockModule.computeLineStats(stations, highSpeed, 1).totalTimeMin,
+    };
+  });
+
+  expect(times).not.toBeNull();
+  expect(times!.metro).toBeLessThan(times!.highSpeed);
+});
+
+test('clicking the end-to-end card opens the journey profile graph', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-name').fill('Graph Line');
+  await page.locator('#new-line-add').click();
+
+  const canvas = await page.locator('#map canvas').boundingBox();
+  const cx = canvas!.x + canvas!.width / 2;
+  const cy = canvas!.y + canvas!.height / 2;
+  await page.mouse.click(cx - 120, cy);
+  await page.mouse.click(cx - 20, cy - 30);
+  await page.mouse.click(cx + 90, cy);
+  await page.waitForTimeout(300);
+
+  await page.evaluate(() => {
+    const editor = (window as unknown as {
+      __networkEditor: {
+        network: {
+          lines: Array<{ id: string }>;
+          setLineTrain: (lineId: string, rollingStockId: string, trainCount?: number) => void;
+        };
+      };
+    }).__networkEditor;
+    editor.network.setLineTrain(editor.network.lines[0].id, 'class-395', 1);
+  });
+
+  await page.locator('#lm-open-journey-profile').click();
+
+  await expect(page.locator('#journey-profile-modal')).toBeVisible();
+  await expect(page.locator('#journey-profile-title')).toContainText('Journey speed profile');
+  await expect(page.locator('#journey-profile-svg')).toBeVisible();
+
+  await page.locator('#journey-profile-chart').hover({ position: { x: 300, y: 140 } });
+
+  await expect(page.locator('#journey-profile-tooltip')).toBeVisible();
+  await expect(page.locator('#journey-profile-tooltip')).toContainText('km/h');
+  await expect(page.locator('#journey-profile-hover-readout')).not.toHaveText('Hover the curve for details');
+});
+
 test('line manager shows empty stop message when line has no stops', async ({ page }) => {
   await page.goto(BASE);
   await waitForMap(page);

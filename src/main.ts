@@ -12,7 +12,7 @@ import type { NetworkExport } from './network';
 import { validateNetworkExport } from './network';
 import { fetchCatchmentStats, preloadLsoa, fetchLineCatchmentStats } from './station-manager';
 import { ROLLING_STOCK, ROLLING_STOCK_CATEGORIES, getRollingStock, computeLineStats } from './rolling-stock';
-import type { RollingStock } from './rolling-stock';
+import type { RollingStock, LineTrainStats, JourneyProfileSegment } from './rolling-stock';
 import { buildExportPreviewHTML, openExportPage } from './map-export';
 import type { ExportStyle } from './map-export';
 
@@ -20,6 +20,8 @@ import type { ExportStyle } from './map-export';
 // via HTTP range-requests from a single static file.
 const protocol = new Protocol();
 maplibregl.addProtocol('pmtiles', protocol.tile.bind(protocol));
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
 
 // Tiles are expected at /tiles/uk.pmtiles (served from public/tiles/)
 const tilesUrl = `${window.location.origin}/tiles/uk.pmtiles`;
@@ -204,10 +206,15 @@ map.on('load', () => {
   // ── Panel element references ────────────────────────────────────────────
   const smEl = document.getElementById('station-manager')!;
   const lmEl = document.getElementById('line-manager')!;
+  const journeyProfileModalEl = document.getElementById('journey-profile-modal')!;
+  const journeyProfileChartEl = document.getElementById('journey-profile-chart')!;
+  const journeyProfileTooltipEl = document.getElementById('journey-profile-tooltip')!;
+  const journeyProfileHoverReadoutEl = document.getElementById('journey-profile-hover-readout')!;
 
   // ── Line Manager helpers ────────────────────────────────────────────────
 
   let openLineId: string | null = null;
+  let openJourneyProfileLineId: string | null = null;
   /** Stable signature of station IDs for the open line — used to gate census re-fetches. */
   let openLineStopSig = '';
   let lmDragSourceIndex: number | null = null;
@@ -216,6 +223,7 @@ map.on('load', () => {
   function closeLineManager(): void {
     lmEl.classList.add('hidden');
     smEl.classList.remove('lm-open');
+    closeJourneyProfileModal();
     openLineId = null;
     openLineStopSig = '';
   }
@@ -256,6 +264,458 @@ map.on('load', () => {
       return mins === 0 ? `${hours}h` : `${hours}h ${mins}m`;
     }
     return `${rounded} min`;
+  }
+
+  function formatElapsedTimeLabel(totalSeconds: number): string {
+    const roundedSeconds = Math.max(0, Math.round(totalSeconds));
+    const hours = Math.floor(roundedSeconds / 3600);
+    const minutes = Math.floor((roundedSeconds % 3600) / 60);
+    const seconds = roundedSeconds % 60;
+
+    if (hours > 0) {
+      return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }
+
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  function formatJourneyPhaseLabel(phase: JourneyProfileSegment['phase']): string {
+    switch (phase) {
+      case 'accelerating':
+        return 'Accelerating';
+      case 'cruising':
+        return 'Cruising';
+      case 'braking':
+        return 'Braking';
+      case 'dwell':
+        return 'Dwelling';
+      default:
+        return 'Moving';
+    }
+  }
+
+  function createSvgElement<K extends keyof SVGElementTagNameMap>(
+    tag: K,
+    attrs: Record<string, string>,
+  ): SVGElementTagNameMap[K] {
+    const element = document.createElementNS(SVG_NS, tag);
+    Object.entries(attrs).forEach(([key, value]) => {
+      element.setAttribute(key, value);
+    });
+    return element;
+  }
+
+  function niceCeiling(value: number, step: number): number {
+    return Math.max(step, Math.ceil(value / step) * step);
+  }
+
+  function clamp(value: number, min: number, max: number): number {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function formatAxisTimeLabel(totalSeconds: number): string {
+    const roundedMinutes = Math.round(totalSeconds / 60);
+    if (roundedMinutes >= 60) {
+      const hours = Math.floor(roundedMinutes / 60);
+      const minutes = roundedMinutes % 60;
+      return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+    }
+
+    return `${roundedMinutes}m`;
+  }
+
+  function getJourneySampleAtTime(stats: LineTrainStats, timeSec: number) {
+    const lastPoint = stats.profilePoints[stats.profilePoints.length - 1];
+    const boundedTimeSec = clamp(timeSec, 0, lastPoint?.timeSec ?? 0);
+    const fallbackSegment = stats.profileSegments[stats.profileSegments.length - 1];
+
+    let activeSegment = fallbackSegment;
+    for (const segment of stats.profileSegments) {
+      if (boundedTimeSec <= segment.endTimeSec) {
+        activeSegment = segment;
+        break;
+      }
+    }
+
+    if (!activeSegment) {
+      return {
+        timeSec: boundedTimeSec,
+        speedKmh: 0,
+        distanceKm: 0,
+        segment: null,
+      };
+    }
+
+    const durationSec = activeSegment.endTimeSec - activeSegment.startTimeSec;
+    const progress = durationSec <= 0 ? 0 : clamp((boundedTimeSec - activeSegment.startTimeSec) / durationSec, 0, 1);
+
+    return {
+      timeSec: boundedTimeSec,
+      speedKmh: activeSegment.startSpeedKmh + ((activeSegment.endSpeedKmh - activeSegment.startSpeedKmh) * progress),
+      distanceKm: activeSegment.startDistanceKm + ((activeSegment.endDistanceKm - activeSegment.startDistanceKm) * progress),
+      segment: activeSegment,
+    };
+  }
+
+  function renderJourneyProfileStops(stats: LineTrainStats, lineColor: string): void {
+    const container = document.getElementById('journey-profile-stops')!;
+    container.innerHTML = '';
+
+    stats.stationStops.forEach((stop, index) => {
+      const item = document.createElement('div');
+      item.className = 'journey-profile-stop';
+      item.style.setProperty('--journey-stop-accent', lineColor);
+
+      const title = document.createElement('div');
+      title.className = 'journey-profile-stop-title';
+      title.textContent = stop.name;
+
+      const meta = document.createElement('div');
+      meta.className = 'journey-profile-stop-meta';
+      if (index === 0) {
+        meta.textContent = `Depart ${formatElapsedTimeLabel(stop.departureTimeSec)}`;
+      } else if (index === stats.stationStops.length - 1) {
+        meta.textContent = `Arrive ${formatElapsedTimeLabel(stop.arrivalTimeSec)}`;
+      } else {
+        meta.textContent = `Arrive ${formatElapsedTimeLabel(stop.arrivalTimeSec)} · Dwell ${stop.dwellTimeSec}s`;
+      }
+
+      const distance = document.createElement('div');
+      distance.className = 'journey-profile-stop-distance';
+      distance.textContent = `${stop.distanceKm.toFixed(1)} km`;
+
+      item.appendChild(title);
+      item.appendChild(meta);
+      item.appendChild(distance);
+      container.appendChild(item);
+    });
+  }
+
+  function renderJourneyProfileChart(lineColor: string, stats: LineTrainStats): void {
+    const svg = document.getElementById('journey-profile-svg');
+    if (!(svg instanceof SVGSVGElement)) return;
+    svg.replaceChildren();
+    journeyProfileTooltipEl.replaceChildren();
+    journeyProfileTooltipEl.classList.add('hidden');
+    journeyProfileHoverReadoutEl.textContent = 'Hover the curve for details';
+    journeyProfileChartEl.style.setProperty('--journey-line-color', lineColor);
+
+    const tooltipTitle = document.createElement('div');
+    tooltipTitle.className = 'journey-profile-tooltip-title';
+    const tooltipValue = document.createElement('div');
+    tooltipValue.className = 'journey-profile-tooltip-value';
+    const tooltipMeta = document.createElement('div');
+    tooltipMeta.className = 'journey-profile-tooltip-meta';
+    journeyProfileTooltipEl.appendChild(tooltipTitle);
+    journeyProfileTooltipEl.appendChild(tooltipValue);
+    journeyProfileTooltipEl.appendChild(tooltipMeta);
+
+    const width = 760;
+    const height = 360;
+    const padding = { top: 24, right: 22, bottom: 44, left: 60 };
+    const plotWidth = width - padding.left - padding.right;
+    const plotHeight = height - padding.top - padding.bottom;
+    const points = stats.profilePoints;
+    const lastPoint = points[points.length - 1];
+    const totalTimeSec = Math.max(lastPoint?.timeSec ?? 0, 1);
+    const maxSpeedKmh = niceCeiling(Math.max(stats.maxReachedSpeedKmh * 1.1, 40), 20);
+
+    const x = (timeSec: number) => padding.left + ((timeSec / totalTimeSec) * plotWidth);
+    const y = (speedKmh: number) => padding.top + plotHeight - ((speedKmh / maxSpeedKmh) * plotHeight);
+
+    const defs = createSvgElement('defs', {});
+    const gradient = createSvgElement('linearGradient', {
+      id: 'journey-profile-area-gradient',
+      x1: '0',
+      x2: '0',
+      y1: '0',
+      y2: '1',
+    });
+    gradient.appendChild(createSvgElement('stop', {
+      offset: '0%',
+      'stop-color': lineColor,
+      'stop-opacity': '0.28',
+    }));
+    gradient.appendChild(createSvgElement('stop', {
+      offset: '100%',
+      'stop-color': lineColor,
+      'stop-opacity': '0',
+    }));
+    defs.appendChild(gradient);
+    svg.appendChild(defs);
+
+    stats.stationStops
+      .filter((stop) => stop.dwellTimeSec > 0)
+      .forEach((stop) => {
+        const dwellRect = createSvgElement('rect', {
+          x: `${x(stop.arrivalTimeSec)}`,
+          y: `${padding.top}`,
+          width: `${Math.max(1, x(stop.departureTimeSec) - x(stop.arrivalTimeSec))}`,
+          height: `${plotHeight}`,
+          fill: lineColor,
+          opacity: '0.06',
+          rx: '4',
+        });
+        svg.appendChild(dwellRect);
+      });
+
+    for (let index = 0; index <= 5; index++) {
+      const speed = (maxSpeedKmh / 5) * index;
+      const yPos = y(speed);
+      svg.appendChild(createSvgElement('line', {
+        x1: `${padding.left}`,
+        y1: `${yPos}`,
+        x2: `${width - padding.right}`,
+        y2: `${yPos}`,
+        stroke: 'rgba(34, 49, 63, 0.12)',
+        'stroke-width': '1',
+      }));
+      const speedLabel = createSvgElement('text', {
+        x: `${padding.left - 12}`,
+        y: `${yPos + 4}`,
+        fill: '#687186',
+        'font-size': '11',
+        'text-anchor': 'end',
+      });
+      speedLabel.textContent = `${Math.round(speed)}`;
+      svg.appendChild(speedLabel);
+    }
+
+    for (let index = 0; index <= 5; index++) {
+      const timeSec = (totalTimeSec / 5) * index;
+      const xPos = x(timeSec);
+      svg.appendChild(createSvgElement('line', {
+        x1: `${xPos}`,
+        y1: `${padding.top}`,
+        x2: `${xPos}`,
+        y2: `${height - padding.bottom}`,
+        stroke: 'rgba(34, 49, 63, 0.08)',
+        'stroke-width': '1',
+        'stroke-dasharray': index === 0 || index === 5 ? '0' : '3 5',
+      }));
+      const timeLabel = createSvgElement('text', {
+        x: `${xPos}`,
+        y: `${height - 14}`,
+        fill: '#687186',
+        'font-size': '11',
+        'text-anchor': index === 0 ? 'start' : index === 5 ? 'end' : 'middle',
+      });
+      timeLabel.textContent = formatAxisTimeLabel(timeSec);
+      svg.appendChild(timeLabel);
+    }
+
+    stats.stationStops.forEach((stop) => {
+      const xPos = x(stop.arrivalTimeSec);
+      svg.appendChild(createSvgElement('line', {
+        x1: `${xPos}`,
+        y1: `${height - padding.bottom}`,
+        x2: `${xPos}`,
+        y2: `${height - padding.bottom + 6}`,
+        stroke: lineColor,
+        'stroke-width': '1.5',
+        opacity: '0.6',
+      }));
+    });
+
+    const pathPoints = points.map((point) => `${x(point.timeSec)} ${y(point.speedKmh)}`).join(' L ');
+    const areaPath = createSvgElement('path', {
+      d: `M ${x(points[0]?.timeSec ?? 0)} ${y(0)} L ${pathPoints} L ${x(lastPoint?.timeSec ?? 0)} ${y(0)} Z`,
+      fill: 'url(#journey-profile-area-gradient)',
+    });
+    svg.appendChild(areaPath);
+
+    const linePath = createSvgElement('path', {
+      d: `M ${pathPoints}`,
+      fill: 'none',
+      stroke: lineColor,
+      'stroke-width': '4',
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+    });
+    svg.appendChild(linePath);
+
+    points.forEach((point, index) => {
+      const pointMarker = createSvgElement('circle', {
+        cx: `${x(point.timeSec)}`,
+        cy: `${y(point.speedKmh)}`,
+        r: index === 0 || index === points.length - 1 ? '4' : '3.5',
+        fill: '#fffcf4',
+        stroke: lineColor,
+        'stroke-width': '2',
+      });
+      svg.appendChild(pointMarker);
+    });
+
+    const hoverGuide = createSvgElement('line', {
+      x1: `${padding.left}`,
+      y1: `${padding.top}`,
+      x2: `${padding.left}`,
+      y2: `${height - padding.bottom}`,
+      stroke: '#2a3242',
+      'stroke-width': '1',
+      'stroke-dasharray': '4 4',
+      opacity: '0',
+    });
+    const hoverDot = createSvgElement('circle', {
+      cx: `${padding.left}`,
+      cy: `${height - padding.bottom}`,
+      r: '6',
+      fill: '#fffcf4',
+      stroke: lineColor,
+      'stroke-width': '3',
+      opacity: '0',
+    });
+    svg.appendChild(hoverGuide);
+    svg.appendChild(hoverDot);
+
+    const xAxisLabel = createSvgElement('text', {
+      x: `${padding.left + (plotWidth / 2)}`,
+      y: `${height - 2}`,
+      fill: '#425067',
+      'font-size': '12',
+      'font-weight': '600',
+      'text-anchor': 'middle',
+    });
+    xAxisLabel.textContent = 'Elapsed time';
+    svg.appendChild(xAxisLabel);
+
+    const yAxisLabel = createSvgElement('text', {
+      x: '16',
+      y: `${padding.top + (plotHeight / 2)}`,
+      fill: '#425067',
+      'font-size': '12',
+      'font-weight': '600',
+      transform: `rotate(-90 16 ${padding.top + (plotHeight / 2)})`,
+      'text-anchor': 'middle',
+    });
+    yAxisLabel.textContent = 'Speed (km/h)';
+    svg.appendChild(yAxisLabel);
+
+    const hoverCapture = createSvgElement('rect', {
+      x: `${padding.left}`,
+      y: `${padding.top}`,
+      width: `${plotWidth}`,
+      height: `${plotHeight}`,
+      fill: 'transparent',
+      'pointer-events': 'all',
+    });
+    svg.appendChild(hoverCapture);
+
+    const hideHoverState = (): void => {
+      hoverGuide.setAttribute('opacity', '0');
+      hoverDot.setAttribute('opacity', '0');
+      journeyProfileTooltipEl.classList.add('hidden');
+      journeyProfileHoverReadoutEl.textContent = 'Hover the curve for details';
+    };
+
+    const updateHoverState = (event: PointerEvent): void => {
+      const rect = journeyProfileChartEl.getBoundingClientRect();
+      const localX = clamp(event.clientX - rect.left, 0, rect.width);
+      const normalizedX = clamp(localX, (padding.left / width) * rect.width, ((width - padding.right) / width) * rect.width);
+      const timeSec = ((normalizedX - ((padding.left / width) * rect.width)) / ((plotWidth / width) * rect.width)) * totalTimeSec;
+      const sample = getJourneySampleAtTime(stats, timeSec);
+      if (!sample.segment) {
+        hideHoverState();
+        return;
+      }
+
+      const dotX = x(sample.timeSec);
+      const dotY = y(sample.speedKmh);
+      hoverGuide.setAttribute('x1', `${dotX}`);
+      hoverGuide.setAttribute('x2', `${dotX}`);
+      hoverGuide.setAttribute('opacity', '1');
+      hoverDot.setAttribute('cx', `${dotX}`);
+      hoverDot.setAttribute('cy', `${dotY}`);
+      hoverDot.setAttribute('opacity', '1');
+
+      const phaseLabel = formatJourneyPhaseLabel(sample.segment.phase);
+      const segmentLabel = sample.segment.phase === 'dwell'
+        ? `Dwell at ${sample.segment.fromStationName ?? 'Station'}`
+        : `${sample.segment.fromStationName ?? 'Origin'} → ${sample.segment.toStationName ?? 'Destination'}`;
+
+      journeyProfileHoverReadoutEl.textContent = `${formatElapsedTimeLabel(sample.timeSec)} · ${Math.round(sample.speedKmh)} km/h · ${phaseLabel}`;
+      tooltipTitle.textContent = segmentLabel;
+      tooltipValue.textContent = `${Math.round(sample.speedKmh)} km/h at ${formatElapsedTimeLabel(sample.timeSec)}`;
+      tooltipMeta.textContent = `${phaseLabel} · ${sample.distanceKm.toFixed(1)} km from origin`;
+
+      journeyProfileTooltipEl.classList.remove('hidden');
+      const pixelY = (dotY / height) * rect.height;
+      const tooltipWidth = journeyProfileTooltipEl.offsetWidth;
+      const tooltipHeight = journeyProfileTooltipEl.offsetHeight;
+      let tooltipLeft = localX + 18;
+      if (tooltipLeft + tooltipWidth > rect.width - 10) {
+        tooltipLeft = localX - tooltipWidth - 18;
+      }
+      const tooltipTop = clamp(pixelY - (tooltipHeight / 2), 10, rect.height - tooltipHeight - 10);
+      journeyProfileTooltipEl.style.left = `${tooltipLeft}px`;
+      journeyProfileTooltipEl.style.top = `${tooltipTop}px`;
+    };
+
+    hoverCapture.addEventListener('pointermove', updateHoverState);
+    hoverCapture.addEventListener('pointerenter', updateHoverState);
+    hoverCapture.addEventListener('pointerleave', hideHoverState);
+  }
+
+  function renderJourneyProfileModal(lineId: string): void {
+    const line = editor.network.getLine(lineId);
+    const stats = getLineTravelStats(lineId);
+    if (!line || !stats) {
+      closeJourneyProfileModal();
+      return;
+    }
+
+    const stock = line.rollingStockId ? getRollingStock(line.rollingStockId) : null;
+    const origin = stats.stationStops[0]?.name ?? 'Origin';
+    const destination = stats.stationStops[stats.stationStops.length - 1]?.name ?? 'Destination';
+    const intermediateStops = Math.max(0, stats.stationStops.length - 2);
+    const modalBox = journeyProfileModalEl.querySelector<HTMLElement>('.journey-profile-box');
+    modalBox?.style.setProperty('--journey-line-color', line.color);
+
+    document.getElementById('journey-profile-subtitle')!.textContent = stock
+      ? `${line.name} · ${stock.designation} ${stock.name}`
+      : line.name;
+    document.getElementById('journey-profile-summary')!.textContent = `${origin} to ${destination} over ${stats.totalDistanceKm.toFixed(1)} km, with ${intermediateStops} intermediate stop${intermediateStops === 1 ? '' : 's'}${stats.dwellTimeMin > 0 ? ` and ${formatDurationLabel(stats.dwellTimeMin)} of scheduled dwell time.` : '.'}`;
+    document.getElementById('journey-profile-total-time')!.textContent = formatDurationLabel(stats.totalTimeMin);
+    document.getElementById('journey-profile-running-time')!.textContent = formatDurationLabel(stats.runningTimeMin);
+    document.getElementById('journey-profile-peak-speed')!.textContent = `${Math.round(stats.maxReachedSpeedKmh)} km/h`;
+    document.getElementById('journey-profile-stop-count')!.textContent = `${stats.stationStops.length}`;
+
+    renderJourneyProfileChart(line.color, stats);
+    renderJourneyProfileStops(stats, line.color);
+  }
+
+  function openJourneyProfileModal(lineId: string): void {
+    const stats = getLineTravelStats(lineId);
+    if (!stats) return;
+
+    openJourneyProfileLineId = lineId;
+    renderJourneyProfileModal(lineId);
+    journeyProfileModalEl.classList.remove('hidden');
+  }
+
+  function closeJourneyProfileModal(): void {
+    journeyProfileModalEl.classList.add('hidden');
+    journeyProfileTooltipEl.classList.add('hidden');
+    journeyProfileHoverReadoutEl.textContent = 'Hover the curve for details';
+    openJourneyProfileLineId = null;
+  }
+
+  function refreshJourneyProfileModal(): void {
+    if (!openJourneyProfileLineId) return;
+
+    const line = editor.network.getLine(openJourneyProfileLineId);
+    if (!line) {
+      closeJourneyProfileModal();
+      return;
+    }
+
+    const stats = getLineTravelStats(openJourneyProfileLineId);
+    if (!stats) {
+      closeJourneyProfileModal();
+      return;
+    }
+
+    renderJourneyProfileModal(openJourneyProfileLineId);
   }
 
   function getLineTravelStats(lineId: string) {
@@ -774,6 +1234,8 @@ map.on('load', () => {
       }
     }
 
+    refreshJourneyProfileModal();
+
     renderLineList(state);
   }
 
@@ -930,6 +1392,10 @@ map.on('load', () => {
     editor.deleteLine(lid);
   });
 
+  document.getElementById('lm-open-journey-profile')!.addEventListener('click', () => {
+    if (openLineId) openJourneyProfileModal(openLineId);
+  });
+
   // ── Rolling stock wiring ──────────────────────────────────────────────
 
   document.getElementById('lm-train-pick')!.addEventListener('click', () => {
@@ -982,6 +1448,18 @@ map.on('load', () => {
     }
   });
 
+  document.getElementById('journey-profile-close')!.addEventListener('click', () => {
+    closeJourneyProfileModal();
+  });
+  document.getElementById('journey-profile-dismiss')!.addEventListener('click', () => {
+    closeJourneyProfileModal();
+  });
+  journeyProfileModalEl.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) {
+      closeJourneyProfileModal();
+    }
+  });
+
   // Color swatches for new line
   const colorContainer = document.getElementById('new-line-colors')!;
   let selectedColor = editor.network.nextColor();
@@ -1027,6 +1505,11 @@ map.on('load', () => {
   document.getElementById('btn-redo')!.addEventListener('click', () => { animateHistoryBtn('btn-redo'); editor.redo(); });
 
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !journeyProfileModalEl.classList.contains('hidden')) {
+      closeJourneyProfileModal();
+      return;
+    }
+
     // Don't fire when the user is typing in a text field
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 

@@ -356,7 +356,11 @@
             <div class="sm-section-label">Line Statistics</div>
             <div id="lm-line-stats-grid">
               <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-distance">—</div><div class="sm-stat-label">Distance</div></div>
-              <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-time">—</div><div class="sm-stat-label">End-to-end</div></div>
+              <button id="lm-open-journey-profile" class="sm-stat lm-journey-card" type="button" title="View journey speed profile">
+                <div class="sm-stat-value" id="lm-ls-time">—</div>
+                <div class="sm-stat-label">End-to-end</div>
+                <div class="lm-journey-card-hint">View speed profile</div>
+              </button>
               <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-totalcost">—</div><div class="sm-stat-label">Fleet cost</div></div>
               <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-capacity">—</div><div class="sm-stat-label">Total seats</div></div>
               <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-tph">—</div><div class="sm-stat-label">Trains / hr</div></div>
@@ -414,6 +418,59 @@
         <div id="train-picker-list"></div>
         <div class="modal-actions">
           <button id="train-picker-cancel" class="modal-btn modal-btn--secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Journey profile modal -->
+    <div id="journey-profile-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="journey-profile-title">
+      <div class="modal-box journey-profile-box">
+        <div class="journey-profile-header">
+          <div>
+            <div class="modal-title" id="journey-profile-title">Journey speed profile</div>
+            <div id="journey-profile-subtitle" class="journey-profile-subtitle"></div>
+          </div>
+          <button id="journey-profile-close" class="journey-profile-close" title="Close journey profile">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 2l10 10M12 2L2 12"/></svg>
+          </button>
+        </div>
+
+        <p id="journey-profile-summary" class="journey-profile-summary"></p>
+
+        <div class="journey-profile-kpis">
+          <div class="journey-profile-kpi">
+            <div class="journey-profile-kpi-value" id="journey-profile-total-time">—</div>
+            <div class="journey-profile-kpi-label">Total journey</div>
+          </div>
+          <div class="journey-profile-kpi">
+            <div class="journey-profile-kpi-value" id="journey-profile-running-time">—</div>
+            <div class="journey-profile-kpi-label">Running time</div>
+          </div>
+          <div class="journey-profile-kpi">
+            <div class="journey-profile-kpi-value" id="journey-profile-peak-speed">—</div>
+            <div class="journey-profile-kpi-label">Peak speed reached</div>
+          </div>
+          <div class="journey-profile-kpi">
+            <div class="journey-profile-kpi-value" id="journey-profile-stop-count">—</div>
+            <div class="journey-profile-kpi-label">Stops</div>
+          </div>
+        </div>
+
+        <div class="journey-profile-chart-card">
+          <div class="journey-profile-chart-head">
+            <div class="journey-profile-chart-title">Speed by elapsed time</div>
+            <div id="journey-profile-hover-readout" class="journey-profile-hover-readout">Hover the curve for details</div>
+          </div>
+          <div id="journey-profile-chart" class="journey-profile-chart">
+            <svg id="journey-profile-svg" viewBox="0 0 760 360" preserveAspectRatio="none" aria-labelledby="journey-profile-title"></svg>
+            <div id="journey-profile-tooltip" class="journey-profile-tooltip hidden"></div>
+          </div>
+        </div>
+
+        <div id="journey-profile-stops" class="journey-profile-stops"></div>
+
+        <div class="modal-actions">
+          <button id="journey-profile-dismiss" class="modal-btn modal-btn--secondary">Close</button>
         </div>
       </div>
     </div>

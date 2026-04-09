@@ -277,15 +277,80 @@ export function getRollingStock(id: string): RollingStock | undefined {
 
 // ── Line statistics ───────────────────────────────────────────────────────────
 
+export type JourneyPhase = 'accelerating' | 'cruising' | 'braking' | 'dwell';
+
+export interface JourneyProfilePoint {
+  /** Elapsed journey time in seconds */
+  timeSec: number;
+  /** Train speed at this point in km/h */
+  speedKmh: number;
+  /** Distance travelled at this point in km */
+  distanceKm: number;
+}
+
+export interface JourneyProfileSegment {
+  /** Segment start time in seconds */
+  startTimeSec: number;
+  /** Segment end time in seconds */
+  endTimeSec: number;
+  /** Segment start speed in km/h */
+  startSpeedKmh: number;
+  /** Segment end speed in km/h */
+  endSpeedKmh: number;
+  /** Distance covered at segment start in km */
+  startDistanceKm: number;
+  /** Distance covered at segment end in km */
+  endDistanceKm: number;
+  /** Motion phase for this slice of the journey */
+  phase: JourneyPhase;
+  /** Zero-based index of the leg this segment belongs to */
+  legIndex: number;
+  /** Zero-based origin station index for the leg */
+  fromStationIndex: number;
+  /** Zero-based destination station index for the leg */
+  toStationIndex: number;
+  /** Origin station label when available */
+  fromStationName?: string;
+  /** Destination station label when available */
+  toStationName?: string;
+}
+
+export interface JourneyStationStop {
+  /** Zero-based station index along the line */
+  stationIndex: number;
+  /** Station label when available */
+  name: string;
+  /** Arrival time in seconds */
+  arrivalTimeSec: number;
+  /** Departure time in seconds */
+  departureTimeSec: number;
+  /** Dwell duration at this station in seconds */
+  dwellTimeSec: number;
+  /** Distance travelled by arrival in km */
+  distanceKm: number;
+}
+
 export interface LineTrainStats {
   /** Distance between each consecutive pair of stations in km */
   legDistances: number[];
   /** Total line distance in km */
   totalDistanceKm: number;
-  /** Travel time for each leg in minutes (at ~70% of max speed) */
+  /** Travel time for each leg in minutes */
   legTimesMin: number[];
+  /** Running time excluding station dwell in minutes */
+  runningTimeMin: number;
+  /** Dwell time spent at intermediate stations in minutes */
+  dwellTimeMin: number;
   /** Total end-to-end travel time in minutes (includes 45s dwell per intermediate stop) */
   totalTimeMin: number;
+  /** Highest speed reached anywhere along the journey in km/h */
+  maxReachedSpeedKmh: number;
+  /** Piecewise profile points for plotting speed against time */
+  profilePoints: JourneyProfilePoint[];
+  /** Piecewise journey segments for graph hover interpolation */
+  profileSegments: JourneyProfileSegment[];
+  /** Arrival and dwell timings at each stop */
+  stationStops: JourneyStationStop[];
   /** Total cost of all units on the line in £M */
   totalCostM: number;
   /** Total passenger capacity across all units */
@@ -310,15 +375,34 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+const RAIL_WINDING_FACTOR = 1.3;
+const DWELL_TIME_SEC = 45;
+const TURNAROUND_TIME_MIN = 5;
+
+function appendJourneySegment(
+  segments: JourneyProfileSegment[],
+  points: JourneyProfilePoint[],
+  segment: JourneyProfileSegment,
+): void {
+  if (segment.endTimeSec <= segment.startTimeSec) return;
+
+  segments.push(segment);
+  points.push({
+    timeSec: segment.endTimeSec,
+    speedKmh: segment.endSpeedKmh,
+    distanceKm: segment.endDistanceKm,
+  });
+}
+
 /**
  * Compute line statistics for a given train assignment.
  *
- * @param stations – ordered array of {lng, lat} for each stop on the line
+ * @param stations – ordered array of {lng, lat, name?} for each stop on the line
  * @param stock – the rolling stock assigned to the line
  * @param unitCount – number of train units operating on the line
  */
 export function computeLineStats(
-  stations: { lng: number; lat: number }[],
+  stations: { lng: number; lat: number; name?: string }[],
   stock: RollingStock,
   unitCount: number,
 ): LineTrainStats {
@@ -328,27 +412,157 @@ export function computeLineStats(
       stations[i - 1].lat, stations[i - 1].lng,
       stations[i].lat, stations[i].lng,
     );
-    // Apply a 1.3× winding factor to approximate real rail distance
-    legDistances.push(d * 1.3);
+    legDistances.push(d * RAIL_WINDING_FACTOR);
   }
 
   const totalDistanceKm = legDistances.reduce((a, b) => a + b, 0);
 
-  // Average cruise speed: ~70% of max speed (accounts for acceleration, deceleration, curves)
-  const avgSpeedKmh = stock.maxSpeedKmh * 0.7;
+  const maxSpeedMs = stock.maxSpeedKmh / 3.6;
+  const accelMs2 = Math.max(0.1, stock.accelerationMs2);
 
-  const legTimesMin = legDistances.map((d) => (d / avgSpeedKmh) * 60);
+  const legTimesMin: number[] = [];
+  const profilePoints: JourneyProfilePoint[] = [{ timeSec: 0, speedKmh: 0, distanceKm: 0 }];
+  const profileSegments: JourneyProfileSegment[] = [];
+  const stationStops: JourneyStationStop[] = [
+    {
+      stationIndex: 0,
+      name: stations[0]?.name ?? 'Stop 1',
+      arrivalTimeSec: 0,
+      departureTimeSec: 0,
+      dwellTimeSec: 0,
+      distanceKm: 0,
+    },
+  ];
 
-  // Dwell time: 45 seconds per intermediate stop
-  const dwellTimeMin = Math.max(0, stations.length - 2) * 0.75;
-  const totalTimeMin = legTimesMin.reduce((a, b) => a + b, 0) + dwellTimeMin;
+  let elapsedSec = 0;
+  let runningTimeSec = 0;
+  let cumulativeDistanceKm = 0;
+  let maxReachedSpeedKmh = 0;
+
+  for (let legIndex = 0; legIndex < legDistances.length; legIndex++) {
+    const legDistanceKm = legDistances[legIndex];
+    const legDistanceM = legDistanceKm * 1000;
+    const fromStationName = stations[legIndex]?.name ?? `Stop ${legIndex + 1}`;
+    const toStationName = stations[legIndex + 1]?.name ?? `Stop ${legIndex + 2}`;
+
+    const distanceNeededForTopSpeedM = (maxSpeedMs * maxSpeedMs) / accelMs2;
+    const peakSpeedMs = legDistanceM >= distanceNeededForTopSpeedM
+      ? maxSpeedMs
+      : Math.sqrt(legDistanceM * accelMs2);
+    const accelTimeSec = peakSpeedMs / accelMs2;
+    const cruiseDistanceM = Math.max(0, legDistanceM - distanceNeededForTopSpeedM);
+    const cruiseTimeSec = peakSpeedMs > 0 ? cruiseDistanceM / peakSpeedMs : 0;
+    const brakeTimeSec = peakSpeedMs / accelMs2;
+
+    const accelDistanceKm = ((peakSpeedMs * peakSpeedMs) / (2 * accelMs2)) / 1000;
+    const cruiseDistanceKm = cruiseDistanceM / 1000;
+    const brakeDistanceKm = Math.max(0, legDistanceKm - accelDistanceKm - cruiseDistanceKm);
+    const peakSpeedKmh = peakSpeedMs * 3.6;
+
+    maxReachedSpeedKmh = Math.max(maxReachedSpeedKmh, peakSpeedKmh);
+
+    const accelStartTimeSec = elapsedSec;
+    const accelStartDistanceKm = cumulativeDistanceKm;
+    elapsedSec += accelTimeSec;
+    cumulativeDistanceKm += accelDistanceKm;
+    appendJourneySegment(profileSegments, profilePoints, {
+      startTimeSec: accelStartTimeSec,
+      endTimeSec: elapsedSec,
+      startSpeedKmh: 0,
+      endSpeedKmh: peakSpeedKmh,
+      startDistanceKm: accelStartDistanceKm,
+      endDistanceKm: cumulativeDistanceKm,
+      phase: 'accelerating',
+      legIndex,
+      fromStationIndex: legIndex,
+      toStationIndex: legIndex + 1,
+      fromStationName,
+      toStationName,
+    });
+
+    const cruiseStartTimeSec = elapsedSec;
+    const cruiseStartDistanceKm = cumulativeDistanceKm;
+    elapsedSec += cruiseTimeSec;
+    cumulativeDistanceKm += cruiseDistanceKm;
+    appendJourneySegment(profileSegments, profilePoints, {
+      startTimeSec: cruiseStartTimeSec,
+      endTimeSec: elapsedSec,
+      startSpeedKmh: peakSpeedKmh,
+      endSpeedKmh: peakSpeedKmh,
+      startDistanceKm: cruiseStartDistanceKm,
+      endDistanceKm: cumulativeDistanceKm,
+      phase: 'cruising',
+      legIndex,
+      fromStationIndex: legIndex,
+      toStationIndex: legIndex + 1,
+      fromStationName,
+      toStationName,
+    });
+
+    const brakeStartTimeSec = elapsedSec;
+    const brakeStartDistanceKm = cumulativeDistanceKm;
+    elapsedSec += brakeTimeSec;
+    cumulativeDistanceKm += brakeDistanceKm;
+    appendJourneySegment(profileSegments, profilePoints, {
+      startTimeSec: brakeStartTimeSec,
+      endTimeSec: elapsedSec,
+      startSpeedKmh: peakSpeedKmh,
+      endSpeedKmh: 0,
+      startDistanceKm: brakeStartDistanceKm,
+      endDistanceKm: cumulativeDistanceKm,
+      phase: 'braking',
+      legIndex,
+      fromStationIndex: legIndex,
+      toStationIndex: legIndex + 1,
+      fromStationName,
+      toStationName,
+    });
+
+    const legTimeSec = accelTimeSec + cruiseTimeSec + brakeTimeSec;
+    runningTimeSec += legTimeSec;
+    legTimesMin.push(legTimeSec / 60);
+
+    const isIntermediateStop = legIndex < legDistances.length - 1;
+    const dwellTimeSec = isIntermediateStop ? DWELL_TIME_SEC : 0;
+    stationStops.push({
+      stationIndex: legIndex + 1,
+      name: toStationName,
+      arrivalTimeSec: elapsedSec,
+      departureTimeSec: elapsedSec + dwellTimeSec,
+      dwellTimeSec,
+      distanceKm: cumulativeDistanceKm,
+    });
+
+    if (dwellTimeSec > 0) {
+      const dwellStartTimeSec = elapsedSec;
+      elapsedSec += dwellTimeSec;
+      appendJourneySegment(profileSegments, profilePoints, {
+        startTimeSec: dwellStartTimeSec,
+        endTimeSec: elapsedSec,
+        startSpeedKmh: 0,
+        endSpeedKmh: 0,
+        startDistanceKm: cumulativeDistanceKm,
+        endDistanceKm: cumulativeDistanceKm,
+        phase: 'dwell',
+        legIndex,
+        fromStationIndex: legIndex + 1,
+        toStationIndex: legIndex + 1,
+        fromStationName: toStationName,
+        toStationName,
+      });
+    }
+  }
+
+  const dwellTimeMin = Math.max(0, stations.length - 2) * (DWELL_TIME_SEC / 60);
+  const runningTimeMin = runningTimeSec / 60;
+  const totalTimeMin = runningTimeMin + dwellTimeMin;
 
   const totalCostM = unitCount * stock.costMillionGbp;
   const totalCapacity = unitCount * stock.totalCapacity;
 
   // Trains per hour: if a round trip takes T minutes, need T/60 trains to run one per hour
   // With N trains, can run N / (roundTrip/60) trains per hour in each direction
-  const roundTripMin = totalTimeMin * 2 + 5; // +5 min turnaround at each end (2.5 each)
+  const roundTripMin = totalTimeMin * 2 + TURNAROUND_TIME_MIN;
   const trainsPerHour = roundTripMin > 0 ? Math.floor((unitCount / (roundTripMin / 60))) : 0;
 
   const passengersThroughput = trainsPerHour * stock.totalCapacity;
@@ -357,7 +571,13 @@ export function computeLineStats(
     legDistances,
     totalDistanceKm,
     legTimesMin,
+    runningTimeMin,
+    dwellTimeMin,
     totalTimeMin,
+    maxReachedSpeedKmh,
+    profilePoints,
+    profileSegments,
+    stationStops,
     totalCostM,
     totalCapacity,
     trainsPerHour,
