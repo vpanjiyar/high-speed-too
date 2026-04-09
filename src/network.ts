@@ -234,6 +234,18 @@ export class Network {
     this._emit();
   }
 
+  moveStationInLine(lineId: string, fromIndex: number, toIndex: number): void {
+    const line = this.lines.find((l) => l.id === lineId);
+    if (!line) return;
+    if (fromIndex === toIndex) return;
+    if (fromIndex < 0 || toIndex < 0) return;
+    if (fromIndex >= line.stationIds.length || toIndex >= line.stationIds.length) return;
+
+    const [stationId] = line.stationIds.splice(fromIndex, 1);
+    line.stationIds.splice(toIndex, 0, stationId);
+    this._emit();
+  }
+
   getLine(id: string): Line | undefined {
     return this.lines.find((l) => l.id === id);
   }

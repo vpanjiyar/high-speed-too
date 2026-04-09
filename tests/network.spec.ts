@@ -845,6 +845,124 @@ test('line manager shows stop list with correct station names', async ({ page })
   expect(stopNames).toHaveLength(2);
 });
 
+test('line manager can reorder stops and updates line geometry', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-name').fill('Reorder Line');
+  await page.locator('#new-line-add').click();
+
+  const canvas = await page.locator('#map canvas').boundingBox();
+  const cx = canvas!.x + canvas!.width / 2;
+  const cy = canvas!.y + canvas!.height / 2;
+  await page.mouse.click(cx - 110, cy);
+  await page.mouse.click(cx, cy);
+  await page.mouse.click(cx + 110, cy);
+  await page.waitForTimeout(300);
+
+  const before = await page.evaluate(() => {
+    const editor = (window as unknown as {
+      __networkEditor: {
+        network: {
+          lines: Array<{ stationIds: string[] }>;
+          renameStation: (stationId: string, name: string) => void;
+        };
+      };
+      __map: {
+        getSource: (id: string) => { _data?: { features?: Array<{ geometry?: { coordinates?: number[][] } }> } };
+      };
+    });
+
+    const stationIds = [...editor.__networkEditor.network.lines[0].stationIds];
+    editor.__networkEditor.network.renameStation(stationIds[0], 'Alpha');
+    editor.__networkEditor.network.renameStation(stationIds[1], 'Bravo');
+    editor.__networkEditor.network.renameStation(stationIds[2], 'Charlie');
+
+    const lineSource = editor.__map.getSource('network-lines');
+    return {
+      stationIds,
+      coordinates: lineSource._data?.features?.[0]?.geometry?.coordinates ?? [],
+    };
+  });
+
+  await expect(page.locator('.lm-stop-name')).toHaveText(['Alpha', 'Bravo', 'Charlie']);
+
+  await page.locator('.lm-stop-item').nth(2).dragTo(page.locator('.lm-stop-item').nth(1), {
+    targetPosition: { x: 16, y: 2 },
+  });
+
+  await expect(page.locator('.lm-stop-name')).toHaveText(['Alpha', 'Charlie', 'Bravo']);
+  await expect(page.locator('.lm-stop-handle')).toHaveCount(3);
+
+  await page.waitForFunction(
+    (expectedOrder) => {
+      const editor = (window as unknown as {
+        __networkEditor: { network: { lines: Array<{ stationIds: string[] }> } };
+      }).__networkEditor;
+      return JSON.stringify(editor.network.lines[0].stationIds) === JSON.stringify(expectedOrder);
+    },
+    [before.stationIds[0], before.stationIds[2], before.stationIds[1]],
+  );
+
+  const after = await page.evaluate(() => {
+    const editor = (window as unknown as {
+      __networkEditor: {
+        network: {
+          lines: Array<{ stationIds: string[] }>;
+        };
+      };
+      __map: {
+        getSource: (id: string) => { _data?: { features?: Array<{ geometry?: { coordinates?: number[][] } }> } };
+      };
+    });
+
+    const lineSource = editor.__map.getSource('network-lines');
+    return {
+      stationIds: [...editor.__networkEditor.network.lines[0].stationIds],
+      coordinates: lineSource._data?.features?.[0]?.geometry?.coordinates ?? [],
+    };
+  });
+
+  expect(after.stationIds).toEqual([before.stationIds[0], before.stationIds[2], before.stationIds[1]]);
+  expect(after.coordinates).toEqual([before.coordinates[0], before.coordinates[2], before.coordinates[1]]);
+});
+
+test('line manager shows end-to-end and between-stop timings for selected rolling stock', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-name').fill('Timed Line');
+  await page.locator('#new-line-add').click();
+
+  const canvas = await page.locator('#map canvas').boundingBox();
+  const cx = canvas!.x + canvas!.width / 2;
+  const cy = canvas!.y + canvas!.height / 2;
+  await page.mouse.click(cx - 100, cy);
+  await page.mouse.click(cx, cy);
+  await page.mouse.click(cx + 100, cy);
+  await page.waitForTimeout(300);
+
+  await page.evaluate(() => {
+    const editor = (window as unknown as {
+      __networkEditor: {
+        network: {
+          lines: Array<{ id: string }>;
+          setLineTrain: (lineId: string, rollingStockId: string, trainCount?: number) => void;
+        };
+      };
+    }).__networkEditor;
+    editor.network.setLineTrain(editor.network.lines[0].id, 'class-395', 1);
+  });
+
+  await expect(page.locator('#lm-total-time')).toBeVisible();
+  await expect(page.locator('#lm-total-time')).toContainText('end-to-end');
+  await expect(page.locator('#lm-ls-time')).not.toHaveText('—');
+  await expect(page.locator('.lm-stop-time-tag')).toHaveCount(2);
+  await expect(page.locator('.lm-stop-time-tag').first()).not.toHaveText('');
+});
+
 test('line manager shows empty stop message when line has no stops', async ({ page }) => {
   await page.goto(BASE);
   await waitForMap(page);

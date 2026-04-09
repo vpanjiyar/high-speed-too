@@ -6,6 +6,16 @@ import { test, expect } from '@playwright/test';
 
 const BASE = 'http://localhost:5174';
 
+type ExportDebug = {
+  header: 'route-bullets' | 'roundel' | 'metro-placard';
+  decorationKinds: string[];
+  routeBullets: Array<{ lineId: string; bullet: string }>;
+  stationSymbols: Array<{ symbol: string; lineCount: number }>;
+  segmentAngles: Array<{ lineId: string; allOctilinear: boolean }>;
+  allOctilinear: boolean;
+  labelCollisions: boolean;
+};
+
 async function waitForMap(page: import('@playwright/test').Page) {
   await page.waitForFunction(
     () => (window as unknown as Record<string, unknown>)['__mapState'] === 'loaded',
@@ -50,6 +60,117 @@ async function seedTwoLines(page: import('@playwright/test').Page) {
   await page.mouse.click(cx, cy - 60);
   await page.mouse.click(cx, cy + 60);
   await page.waitForTimeout(300);
+}
+
+async function seedDeterministicInterchangeNetwork(page: import('@playwright/test').Page) {
+  await page.evaluate(() => {
+    const network = (window as unknown as {
+      __networkEditor: {
+        network: {
+          addLine: (name: string, color: string) => { id: string };
+          addStation: (lng: number, lat: number, name: string) => { id: string };
+          addStationToLine: (lineId: string, stationId: string) => void;
+        };
+      };
+    }).__networkEditor.network;
+
+    const central = network.addLine('Central', '#DC241F');
+    const victoria = network.addLine('Victoria', '#00A0E2');
+
+    const westEnd = network.addStation(-0.155, 51.515, 'West End');
+    const oxford = network.addStation(-0.141, 51.515, 'Oxford Circus');
+    const holborn = network.addStation(-0.119, 51.517, 'Holborn');
+    const bank = network.addStation(-0.091, 51.513, 'Bank');
+    const kingsCross = network.addStation(-0.123, 51.531, 'King\'s Cross');
+    const greenPark = network.addStation(-0.142, 51.506, 'Green Park');
+    const brixton = network.addStation(-0.115, 51.462, 'Brixton');
+
+    network.addStationToLine(central.id, westEnd.id);
+    network.addStationToLine(central.id, oxford.id);
+    network.addStationToLine(central.id, holborn.id);
+    network.addStationToLine(central.id, bank.id);
+
+    network.addStationToLine(victoria.id, kingsCross.id);
+    network.addStationToLine(victoria.id, oxford.id);
+    network.addStationToLine(victoria.id, greenPark.id);
+    network.addStationToLine(victoria.id, brixton.id);
+  });
+
+  await page.waitForTimeout(120);
+}
+
+async function openExportPageFor(
+  page: import('@playwright/test').Page,
+  context: import('@playwright/test').BrowserContext,
+  style: 'mta' | 'lu' | 'paris' = 'mta',
+) {
+  await page.locator('#btn-export').click();
+  await page.locator('#export-btn-next').click();
+
+  if (style !== 'mta') {
+    await page.locator(`input[name="export-style"][value="${style}"]`).check();
+  }
+
+  const [exportPage] = await Promise.all([
+    context.waitForEvent('page'),
+    page.locator('#export-btn-export').click(),
+  ]);
+
+  await exportPage.waitForLoadState('domcontentloaded');
+  return exportPage;
+}
+
+async function getExportDebug(page: import('@playwright/test').Page): Promise<ExportDebug> {
+  return page.evaluate(() => (window as unknown as { __EXPORT_DEBUG__: ExportDebug }).__EXPORT_DEBUG__);
+}
+
+async function waitForPreviewDebug(page: import('@playwright/test').Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const frame = document.getElementById('export-preview-frame') as HTMLIFrameElement | null;
+    return Boolean(frame?.contentWindow && (frame.contentWindow as Window & { __EXPORT_DEBUG__?: unknown }).__EXPORT_DEBUG__);
+  });
+}
+
+async function getPreviewDebug(page: import('@playwright/test').Page): Promise<ExportDebug> {
+  await waitForPreviewDebug(page);
+  return page.evaluate(() => {
+    const frame = document.getElementById('export-preview-frame') as HTMLIFrameElement;
+    return (frame.contentWindow as Window & { __EXPORT_DEBUG__: ExportDebug }).__EXPORT_DEBUG__;
+  });
+}
+
+async function waitForPreviewHeader(
+  page: import('@playwright/test').Page,
+  header: ExportDebug['header'],
+): Promise<ExportDebug> {
+  await page.waitForFunction((expectedHeader) => {
+    const frame = document.getElementById('export-preview-frame') as HTMLIFrameElement | null;
+    return (frame?.contentWindow as Window & { __EXPORT_DEBUG__?: ExportDebug } | null)?.__EXPORT_DEBUG__?.header === expectedHeader;
+  }, header);
+  return getPreviewDebug(page);
+}
+
+async function sampleCanvasPixel(
+  page: import('@playwright/test').Page,
+  x: number,
+  y: number,
+): Promise<[number, number, number, number]> {
+  return page.evaluate(([px, py]) => {
+    const canvas = document.getElementById('export-canvas') as HTMLCanvasElement;
+    const data = canvas.getContext('2d')!.getImageData(px, py, 1, 1).data;
+    return [data[0], data[1], data[2], data[3]] as [number, number, number, number];
+  }, [x, y]);
+}
+
+function expectPixelApprox(
+  pixel: [number, number, number, number],
+  expected: [number, number, number],
+  tolerance = 26,
+) {
+  expect(Math.abs(pixel[0] - expected[0])).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(pixel[1] - expected[1])).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(pixel[2] - expected[2])).toBeLessThanOrEqual(tolerance);
+  expect(pixel[3]).toBeGreaterThan(0);
 }
 
 // ── UI presence ────────────────────────────────────────────────────────────────
@@ -200,6 +321,18 @@ test('can select London Underground style', async ({ page }) => {
   await expect(luRadio).toBeChecked();
 });
 
+test('can select Paris Metro style', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await seedNetwork(page);
+
+  await page.locator('#btn-export').click();
+  await page.locator('#export-btn-next').click();
+
+  await page.locator('input[name="export-style"][value="paris"]').check();
+  await expect(page.locator('input[name="export-style"][value="paris"]')).toBeChecked();
+});
+
 test('legend checkbox is shown and checked by default', async ({ page }) => {
   await page.goto(BASE);
   await waitForMap(page);
@@ -223,6 +356,27 @@ test('legend checkbox can be unchecked', async ({ page }) => {
 
   await page.locator('#export-show-legend').uncheck();
   await expect(page.locator('#export-show-legend')).not.toBeChecked();
+});
+
+test('style step shows a live preview and updates when the style changes', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await seedDeterministicInterchangeNetwork(page);
+
+  await page.locator('#btn-export').click();
+  await page.locator('#export-btn-next').click();
+
+  await expect(page.locator('#export-preview-frame')).toBeVisible();
+  let previewDebug = await waitForPreviewHeader(page, 'route-bullets');
+  expect(previewDebug.header).toBe('route-bullets');
+
+  await page.locator('input[name="export-style"][value="lu"]').check();
+  previewDebug = await waitForPreviewHeader(page, 'roundel');
+  expect(previewDebug.header).toBe('roundel');
+
+  await page.locator('input[name="export-style"][value="paris"]').check();
+  previewDebug = await waitForPreviewHeader(page, 'metro-placard');
+  expect(previewDebug.header).toBe('metro-placard');
 });
 
 // ── Export modal — navigation ───────────────────────────────────────────────
@@ -315,6 +469,16 @@ test('export button opens a new page with LU style', async ({ page, context }) =
   const canvas = exportPage.locator('#export-canvas');
   await expect(canvas).toBeVisible();
 
+  await exportPage.close();
+});
+
+test('export button opens a new page with Paris style', async ({ page, context }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await seedNetwork(page);
+
+  const exportPage = await openExportPageFor(page, context, 'paris');
+  await expect(exportPage.locator('#export-canvas')).toBeVisible();
   await exportPage.close();
 });
 
@@ -416,6 +580,23 @@ test('LU export downloads file with lu in filename', async ({ page, context }) =
   await exportPage.close();
 });
 
+test('Paris export downloads file with paris in filename', async ({ page, context }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await seedNetwork(page);
+
+  const exportPage = await openExportPageFor(page, context, 'paris');
+
+  const [download] = await Promise.all([
+    exportPage.waitForEvent('download'),
+    exportPage.locator('#btn-download').click(),
+  ]);
+
+  expect(download.suggestedFilename()).toMatch(/transit-map-paris\.png/);
+
+  await exportPage.close();
+});
+
 // ── Export modal closes after export ─────────────────────────────────────────
 
 test('export modal closes after clicking export', async ({ page, context }) => {
@@ -468,4 +649,78 @@ test('can deselect specific lines for export', async ({ page }) => {
   // Second line should still be checked
   const secondCb = page.locator('.export-line-item input[type="checkbox"]').nth(1);
   await expect(secondCb).toBeChecked();
+});
+
+test('LU export uses octilinear routing and tube station symbols', async ({ page, context }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await seedDeterministicInterchangeNetwork(page);
+
+  const exportPage = await openExportPageFor(page, context, 'lu');
+  const debug = await getExportDebug(exportPage);
+
+  expect(debug.header).toBe('roundel');
+  expect(debug.allOctilinear).toBe(true);
+  expect(debug.segmentAngles.every((segment) => segment.allOctilinear)).toBe(true);
+  expect(debug.decorationKinds).toContain('roundel');
+  expect(debug.stationSymbols.some((station) => station.symbol === 'tick')).toBe(true);
+  expect(debug.stationSymbols.some((station) => station.symbol === 'interchange')).toBe(true);
+  expect(debug.labelCollisions).toBe(false);
+
+  await exportPage.close();
+});
+
+test('LU export paints the roundel header in TfL blue and red', async ({ page, context }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await seedDeterministicInterchangeNetwork(page);
+
+  const exportPage = await openExportPageFor(page, context, 'lu');
+  const bluePixel = await sampleCanvasPixel(exportPage, 76, 77);
+  const redPixel = await sampleCanvasPixel(exportPage, 129, 47);
+
+  expectPixelApprox(bluePixel, [0, 25, 168], 24);
+  expectPixelApprox(redPixel, [220, 36, 31], 28);
+
+  await exportPage.close();
+});
+
+test('MTA export exposes route bullets and paints a blue water band', async ({ page, context }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await seedDeterministicInterchangeNetwork(page);
+
+  const exportPage = await openExportPageFor(page, context, 'mta');
+  const debug = await getExportDebug(exportPage);
+  const waterPixel = await sampleCanvasPixel(exportPage, 120, 780);
+
+  expect(debug.header).toBe('route-bullets');
+  expect(debug.decorationKinds).toContain('water-band');
+  expect(debug.routeBullets).toHaveLength(2);
+  expect(debug.routeBullets.map((bullet) => bullet.bullet)).toEqual(['C', 'V']);
+  expect(debug.stationSymbols.some((station) => station.symbol === 'dot')).toBe(true);
+  expect(debug.stationSymbols.some((station) => station.symbol === 'interchange')).toBe(true);
+  expect(debug.labelCollisions).toBe(false);
+  expectPixelApprox(waterPixel, [191, 208, 225], 30);
+
+  await exportPage.close();
+});
+
+test('Paris export exposes Metro placard styling and compact station symbols', async ({ page, context }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await seedDeterministicInterchangeNetwork(page);
+
+  const exportPage = await openExportPageFor(page, context, 'paris');
+  const debug = await getExportDebug(exportPage);
+  const placardPixel = await sampleCanvasPixel(exportPage, 88, 78);
+
+  expect(debug.header).toBe('metro-placard');
+  expect(debug.decorationKinds).toContain('metro-placard');
+  expect(debug.stationSymbols.some((station) => station.symbol === 'dot')).toBe(true);
+  expect(debug.stationSymbols.some((station) => station.symbol === 'interchange')).toBe(true);
+  expect(debug.labelCollisions).toBe(false);
+  expectPixelApprox(placardPixel, [22, 59, 117], 28);
+
+  await exportPage.close();
 });

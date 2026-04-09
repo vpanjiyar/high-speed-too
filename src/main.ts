@@ -13,7 +13,7 @@ import { validateNetworkExport } from './network';
 import { fetchCatchmentStats, preloadLsoa, fetchLineCatchmentStats } from './station-manager';
 import { ROLLING_STOCK, ROLLING_STOCK_CATEGORIES, getRollingStock, computeLineStats } from './rolling-stock';
 import type { RollingStock } from './rolling-stock';
-import { openExportPage } from './map-export';
+import { buildExportPreviewHTML, openExportPage } from './map-export';
 import type { ExportStyle } from './map-export';
 
 // Register the PMTiles custom protocol so MapLibre can load .pmtiles files
@@ -210,6 +210,8 @@ map.on('load', () => {
   let openLineId: string | null = null;
   /** Stable signature of station IDs for the open line — used to gate census re-fetches. */
   let openLineStopSig = '';
+  let lmDragSourceIndex: number | null = null;
+  let lmSuppressStopClick = false;
 
   function closeLineManager(): void {
     lmEl.classList.add('hidden');
@@ -243,6 +245,66 @@ map.on('load', () => {
     const icon = document.getElementById('line-manager-icon')!;
     icon.style.color = line.color;
     icon.style.opacity = '1';
+    renderLmTotalTime(lineId);
+  }
+
+  function formatDurationLabel(minutes: number): string {
+    const rounded = Math.max(1, Math.round(minutes));
+    if (rounded >= 60) {
+      const hours = Math.floor(rounded / 60);
+      const mins = rounded % 60;
+      return mins === 0 ? `${hours}h` : `${hours}h ${mins}m`;
+    }
+    return `${rounded} min`;
+  }
+
+  function getLineTravelStats(lineId: string) {
+    const line = editor.network.getLine(lineId);
+    if (!line?.rollingStockId) return null;
+
+    const stock = getRollingStock(line.rollingStockId);
+    if (!stock) return null;
+
+    const stations = line.stationIds
+      .map((id) => editor.network.getStation(id))
+      .filter((station): station is NonNullable<typeof station> => !!station);
+
+    if (stations.length < 2) return null;
+
+    return computeLineStats(stations, stock, line.trainCount ?? 1);
+  }
+
+  function renderLmTotalTime(lineId: string): void {
+    const badge = document.getElementById('lm-total-time')!;
+    const stats = getLineTravelStats(lineId);
+
+    if (!stats) {
+      badge.textContent = '';
+      badge.classList.add('hidden');
+      return;
+    }
+
+    badge.textContent = `${formatDurationLabel(stats.totalTimeMin)} end-to-end`;
+    badge.classList.remove('hidden');
+  }
+
+  function moveLmStop(lineId: string, fromIndex: number, targetIndex: number, placeAfter: boolean): void {
+    const line = editor.network.getLine(lineId);
+    if (!line) return;
+
+    let toIndex = placeAfter ? targetIndex + 1 : targetIndex;
+    if (fromIndex < toIndex) toIndex -= 1;
+    toIndex = Math.max(0, Math.min(line.stationIds.length - 1, toIndex));
+
+    if (toIndex === fromIndex) return;
+    editor.network.moveStationInLine(lineId, fromIndex, toIndex);
+  }
+
+  function focusLmStopHandle(index: number): void {
+    window.requestAnimationFrame(() => {
+      const handle = document.querySelector<HTMLElement>(`.lm-stop-item[data-stop-index="${index}"] .lm-stop-handle`);
+      handle?.focus();
+    });
   }
 
   function renderLmStops(lineId: string): void {
@@ -250,6 +312,12 @@ map.on('load', () => {
     const list = document.getElementById('lm-stop-list')!;
     const countEl = document.getElementById('lm-stop-count')!;
     list.innerHTML = '';
+
+    const clearDropState = (): void => {
+      list.querySelectorAll<HTMLElement>('.lm-stop-item').forEach((node) => {
+        node.classList.remove('drag-over-before', 'drag-over-after', 'is-dragging');
+      });
+    };
 
     if (!line || line.stationIds.length === 0) {
       countEl.textContent = '';
@@ -262,6 +330,8 @@ map.on('load', () => {
 
     countEl.textContent = `${line.stationIds.length} stop${line.stationIds.length !== 1 ? 's' : ''}`;
 
+    const travelStats = getLineTravelStats(lineId);
+
     line.stationIds.forEach((sid, idx) => {
       const station = editor.network.getStation(sid);
       const name = station?.name ?? '(unknown)';
@@ -271,6 +341,8 @@ map.on('load', () => {
       const item = document.createElement('div');
       item.className = 'lm-stop-item';
       item.dataset.stationId = sid;
+      item.dataset.stopIndex = String(idx);
+      item.draggable = true;
 
       const rail = document.createElement('div');
       rail.className = 'lm-stop-rail';
@@ -295,15 +367,95 @@ map.on('load', () => {
       nameEl.className = 'lm-stop-name';
       nameEl.textContent = name;
 
-      const arrow = document.createElement('div');
-      arrow.className = 'lm-stop-arrow';
-      arrow.textContent = '›';
+      const legTime = !isFirst ? travelStats?.legTimesMin[idx - 1] : undefined;
+      const timeTag = typeof legTime === 'number' ? document.createElement('span') : null;
+      if (timeTag && typeof legTime === 'number') {
+        timeTag.className = 'lm-stop-time-tag';
+        timeTag.textContent = formatDurationLabel(legTime);
+      }
+
+      const handle = document.createElement('button');
+      handle.type = 'button';
+      handle.className = 'lm-stop-handle';
+      handle.title = 'Drag to reorder. Press Alt+Arrow keys to move.';
+      handle.setAttribute('aria-label', `Reorder ${name}. Drag to move, or press Alt plus arrow keys.`);
+      handle.innerHTML = '<span class="lm-stop-grip" aria-hidden="true"><span class="lm-stop-grip-line"></span><span class="lm-stop-grip-line"></span><span class="lm-stop-grip-line"></span></span>';
+      handle.addEventListener('click', (event) => {
+        event.stopPropagation();
+      });
+      handle.addEventListener('keydown', (event) => {
+        if (!event.altKey) return;
+
+        if (event.key === 'ArrowUp' && !isFirst) {
+          event.preventDefault();
+          event.stopPropagation();
+          editor.network.moveStationInLine(lineId, idx, idx - 1);
+          focusLmStopHandle(idx - 1);
+        }
+
+        if (event.key === 'ArrowDown' && !isLast) {
+          event.preventDefault();
+          event.stopPropagation();
+          editor.network.moveStationInLine(lineId, idx, idx + 1);
+          focusLmStopHandle(idx + 1);
+        }
+      });
+
+      item.addEventListener('dragstart', (event) => {
+        lmDragSourceIndex = idx;
+        lmSuppressStopClick = true;
+        clearDropState();
+        item.classList.add('is-dragging');
+        event.dataTransfer?.setData('text/plain', String(idx));
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.dropEffect = 'move';
+        }
+      });
+
+      item.addEventListener('dragover', (event) => {
+        if (lmDragSourceIndex === null || lmDragSourceIndex === idx) return;
+        event.preventDefault();
+
+        const rect = item.getBoundingClientRect();
+        const placeAfter = event.clientY > rect.top + rect.height / 2;
+        clearDropState();
+        item.classList.add(placeAfter ? 'drag-over-after' : 'drag-over-before');
+      });
+
+      item.addEventListener('drop', (event) => {
+        if (lmDragSourceIndex === null) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const rect = item.getBoundingClientRect();
+        const placeAfter = event.clientY > rect.top + rect.height / 2;
+        moveLmStop(lineId, lmDragSourceIndex, idx, placeAfter);
+        clearDropState();
+      });
+
+      item.addEventListener('dragleave', (event) => {
+        const relatedTarget = event.relatedTarget;
+        if (relatedTarget instanceof Node && item.contains(relatedTarget)) return;
+        item.classList.remove('drag-over-before', 'drag-over-after');
+      });
+
+      item.addEventListener('dragend', () => {
+        lmDragSourceIndex = null;
+        clearDropState();
+        window.setTimeout(() => {
+          lmSuppressStopClick = false;
+        }, 0);
+      });
 
       item.appendChild(rail);
       item.appendChild(nameEl);
-      item.appendChild(arrow);
+      if (timeTag) item.appendChild(timeTag);
+      item.appendChild(handle);
 
       item.addEventListener('click', () => {
+        if (lmSuppressStopClick) return;
         if (station) editor.selectStation(station.id);
       });
 
@@ -376,6 +528,7 @@ map.on('load', () => {
         info.classList.remove('hidden');
         renderTrainCard(stock);
         countInput.value = String(line.trainCount ?? 1);
+        renderLmTotalTime(lineId);
         refreshLineStats(lineId);
         return;
       }
@@ -383,32 +536,20 @@ map.on('load', () => {
     selector.style.display = '';
     info.classList.add('hidden');
     document.getElementById('lm-line-stats')!.classList.add('hidden');
+    renderLmTotalTime(lineId);
   }
 
   function refreshLineStats(lineId: string): void {
-    const line = editor.network.getLine(lineId);
-    if (!line?.rollingStockId) {
+    const stats = getLineTravelStats(lineId);
+    if (!stats) {
       document.getElementById('lm-line-stats')!.classList.add('hidden');
       return;
     }
-    const stock = getRollingStock(line.rollingStockId);
-    if (!stock) return;
-
-    const stations = line.stationIds
-      .map((id) => editor.network.getStation(id))
-      .filter((s): s is NonNullable<typeof s> => !!s);
-
-    if (stations.length < 2) {
-      document.getElementById('lm-line-stats')!.classList.add('hidden');
-      return;
-    }
-
-    const stats = computeLineStats(stations, stock, line.trainCount ?? 1);
     const el = document.getElementById('lm-line-stats')!;
     el.classList.remove('hidden');
 
     document.getElementById('lm-ls-distance')!.textContent = `${stats.totalDistanceKm.toFixed(1)} km`;
-    document.getElementById('lm-ls-time')!.textContent = `${Math.round(stats.totalTimeMin)} min`;
+    document.getElementById('lm-ls-time')!.textContent = formatDurationLabel(stats.totalTimeMin);
     document.getElementById('lm-ls-totalcost')!.textContent = `£${stats.totalCostM.toFixed(1)}M`;
     document.getElementById('lm-ls-capacity')!.textContent = stats.totalCapacity.toLocaleString('en-GB');
     document.getElementById('lm-ls-tph')!.textContent = `${stats.trainsPerHour}`;
@@ -623,12 +764,12 @@ map.on('load', () => {
         (document.getElementById('line-manager-name') as HTMLInputElement).value = line.name;
         renderLmHeader(openLineId);
         renderLmSwatches(openLineId);
+        renderLmTrain(openLineId);
         // Re-fetch census only when stop list changed
         const sig = line.stationIds.join(',');
         if (sig !== openLineStopSig) {
           openLineStopSig = sig;
           refreshLmStats(openLineId);
-          refreshLineStats(openLineId);
         }
       }
     }
@@ -1005,13 +1146,28 @@ map.on('load', () => {
   const exportBtnCancel = document.getElementById('export-btn-cancel')!;
   const exportLineList = document.getElementById('export-line-list')!;
   const exportNoLines = document.getElementById('export-no-lines')!;
+  const exportShowLegend = document.getElementById('export-show-legend') as HTMLInputElement;
+  const exportPreviewFrame = document.getElementById('export-preview-frame') as HTMLIFrameElement;
+
+  function getSelectedExportStyle(): ExportStyle {
+    const styleRadio = document.querySelector<HTMLInputElement>('input[name="export-style"]:checked');
+    return (styleRadio?.value as ExportStyle) || 'mta';
+  }
+
+  function renderExportPreview(): void {
+    exportPreviewFrame.srcdoc = buildExportPreviewHTML(editor.network, {
+      style: getSelectedExportStyle(),
+      lineIds: getSelectedExportLineIds(),
+      showLegend: exportShowLegend.checked,
+    });
+  }
 
   function openExportModal(): void {
     exportStepLines.classList.remove('hidden');
     exportStepStyle.classList.add('hidden');
-    exportBtnNext.style.display = '';
-    exportBtnBack.style.display = 'none';
-    exportBtnExport.style.display = 'none';
+    exportBtnNext.classList.remove('hidden');
+    exportBtnBack.classList.add('hidden');
+    exportBtnExport.classList.add('hidden');
 
     // Populate line list
     exportLineList.innerHTML = '';
@@ -1019,9 +1175,10 @@ map.on('load', () => {
 
     if (lines.length === 0) {
       exportNoLines.classList.remove('hidden');
-      exportBtnNext.style.display = 'none';
+      exportBtnNext.classList.add('hidden');
     } else {
       exportNoLines.classList.add('hidden');
+      exportBtnNext.classList.remove('hidden');
       for (const line of lines) {
         const item = document.createElement('label');
         item.className = 'export-line-item';
@@ -1042,6 +1199,12 @@ map.on('load', () => {
         const stops = document.createElement('span');
         stops.className = 'export-line-stops';
         stops.textContent = `${line.stationIds.length} stops`;
+
+        cb.addEventListener('change', () => {
+          if (!exportStepStyle.classList.contains('hidden')) {
+            renderExportPreview();
+          }
+        });
 
         item.appendChild(cb);
         item.appendChild(dot);
@@ -1071,27 +1234,41 @@ map.on('load', () => {
     }
     exportStepLines.classList.add('hidden');
     exportStepStyle.classList.remove('hidden');
-    exportBtnNext.style.display = 'none';
-    exportBtnBack.style.display = '';
-    exportBtnExport.style.display = '';
+    exportBtnNext.classList.add('hidden');
+    exportBtnBack.classList.remove('hidden');
+    exportBtnExport.classList.remove('hidden');
+    renderExportPreview();
   });
 
   exportBtnBack.addEventListener('click', () => {
     exportStepLines.classList.remove('hidden');
     exportStepStyle.classList.add('hidden');
-    exportBtnNext.style.display = '';
-    exportBtnBack.style.display = 'none';
-    exportBtnExport.style.display = 'none';
+    exportBtnNext.classList.remove('hidden');
+    exportBtnBack.classList.add('hidden');
+    exportBtnExport.classList.add('hidden');
   });
 
   exportBtnExport.addEventListener('click', () => {
     const lineIds = getSelectedExportLineIds();
-    const styleRadio = document.querySelector<HTMLInputElement>('input[name="export-style"]:checked');
-    const style: ExportStyle = (styleRadio?.value as ExportStyle) || 'mta';
-    const showLegend = (document.getElementById('export-show-legend') as HTMLInputElement).checked;
+    const style = getSelectedExportStyle();
+    const showLegend = exportShowLegend.checked;
 
     closeExportModal();
     openExportPage(editor.network, { style, lineIds, showLegend });
+  });
+
+  document.querySelectorAll<HTMLInputElement>('input[name="export-style"]').forEach((radio) => {
+    radio.addEventListener('change', () => {
+      if (!exportStepStyle.classList.contains('hidden')) {
+        renderExportPreview();
+      }
+    });
+  });
+
+  exportShowLegend.addEventListener('change', () => {
+    if (!exportStepStyle.classList.contains('hidden')) {
+      renderExportPreview();
+    }
   });
 
   exportBtnCancel.addEventListener('click', closeExportModal);

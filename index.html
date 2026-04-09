@@ -262,7 +262,10 @@
             <div id="line-manager-icon">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><line x1="2" y1="8" x2="14" y2="8"/><circle cx="5" cy="8" r="2.5" fill="currentColor" stroke="none"/><circle cx="11" cy="8" r="2.5" fill="currentColor" stroke="none"/></svg>
             </div>
-            <input id="line-manager-name" type="text" placeholder="Line name…" maxlength="60" autocomplete="off" spellcheck="false" />
+            <div id="line-manager-title-copy">
+              <input id="line-manager-name" type="text" placeholder="Line name…" maxlength="60" autocomplete="off" spellcheck="false" />
+              <span id="lm-total-time" class="hidden"></span>
+            </div>
           </div>
           <button id="line-manager-close" title="Close">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 2l10 10M12 2L2 12"/></svg>
@@ -430,32 +433,52 @@
         <!-- Step 2: Style selection -->
         <div id="export-step-style" class="export-step hidden">
           <p class="modal-text">Choose a map style:</p>
-          <div class="export-style-options">
-            <label class="export-style-option">
-              <input type="radio" name="export-style" value="mta" checked />
-              <div class="export-style-card">
-                <div class="export-style-name">NY Metro (MTA)</div>
-                <div class="export-style-desc">Somewhat realistic map following MTA guidelines. Geographic routes with bullet stations.</div>
+          <div class="export-style-layout">
+            <div class="export-style-controls">
+              <div class="export-style-options">
+                <label class="export-style-option">
+                  <input type="radio" name="export-style" value="mta" checked />
+                  <div class="export-style-card">
+                    <div class="export-style-name">NY Metro (MTA)</div>
+                    <div class="export-style-desc">Bullet-route header, bolder park and water blocks, and a denser trunk-style schematic.</div>
+                  </div>
+                </label>
+                <label class="export-style-option">
+                  <input type="radio" name="export-style" value="lu" />
+                  <div class="export-style-card">
+                    <div class="export-style-name">London Underground</div>
+                    <div class="export-style-desc">Beck-style octolinear geometry, roundel treatment, and tick-mark station symbols.</div>
+                  </div>
+                </label>
+                <label class="export-style-option">
+                  <input type="radio" name="export-style" value="paris" />
+                  <div class="export-style-card">
+                    <div class="export-style-name">Paris Metro</div>
+                    <div class="export-style-desc">Compact spacing, Metro placard header, and a denser Paris-inspired visual language.</div>
+                  </div>
+                </label>
               </div>
-            </label>
-            <label class="export-style-option">
-              <input type="radio" name="export-style" value="lu" />
-              <div class="export-style-card">
-                <div class="export-style-name">London Underground</div>
-                <div class="export-style-desc">Abstract schematic map following Beck's original rules. Octilinear lines with tick-mark stations.</div>
+              <label class="export-legend-toggle">
+                <input type="checkbox" id="export-show-legend" checked />
+                <span>Show key / legend</span>
+              </label>
+            </div>
+            <div class="export-preview-panel">
+              <div class="export-preview-header">
+                <span class="export-preview-title">Live preview</span>
+                <span class="export-preview-note">Matches the exported render</span>
               </div>
-            </label>
+              <div class="export-preview-frame-wrap">
+                <iframe id="export-preview-frame" title="Export preview" loading="lazy"></iframe>
+              </div>
+            </div>
           </div>
-          <label class="export-legend-toggle">
-            <input type="checkbox" id="export-show-legend" checked />
-            <span>Show key / legend</span>
-          </label>
         </div>
 
         <div class="modal-actions">
-          <button id="export-btn-back" class="modal-btn modal-btn--secondary" style="display:none">Back</button>
+          <button id="export-btn-back" class="modal-btn modal-btn--secondary hidden">Back</button>
           <button id="export-btn-next" class="modal-btn modal-btn--primary">Next</button>
-          <button id="export-btn-export" class="modal-btn modal-btn--primary" style="display:none">Export</button>
+          <button id="export-btn-export" class="modal-btn modal-btn--primary hidden">Export</button>
           <button id="export-btn-cancel" class="modal-btn modal-btn--secondary">Cancel</button>
         </div>
       </div>
