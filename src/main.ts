@@ -23,8 +23,10 @@ maplibregl.addProtocol('pmtiles', protocol.tile.bind(protocol));
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-// Tiles are expected at /tiles/uk.pmtiles (served from public/tiles/)
-const tilesUrl = `${window.location.origin}/tiles/uk.pmtiles`;
+// Tiles URL: use VITE_TILES_URL env var if set (e.g. Cloudflare R2 public bucket),
+// otherwise fall back to the locally-served file for dev.
+const tilesUrl: string = (import.meta.env.VITE_TILES_URL as string | undefined)
+  ?? `${window.location.origin}/tiles/uk.pmtiles`;
 
 const map = new maplibregl.Map({
   container: 'map',
