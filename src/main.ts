@@ -23,10 +23,31 @@ maplibregl.addProtocol('pmtiles', protocol.tile.bind(protocol));
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+function resolveTilesUrl(configuredUrl: string | undefined): string {
+  const fallbackUrl = `${window.location.origin}/tiles/uk.pmtiles`;
+  if (!configuredUrl) return fallbackUrl;
+
+  const trimmedUrl = configuredUrl.trim();
+  if (!trimmedUrl) return fallbackUrl;
+
+  const candidateUrl = /^[a-z]+:\/\//i.test(trimmedUrl)
+    ? trimmedUrl
+    : `https://${trimmedUrl}`;
+
+  try {
+    const parsedUrl = new URL(candidateUrl);
+    if (parsedUrl.pathname === '/' || parsedUrl.pathname === '') {
+      parsedUrl.pathname = '/uk.pmtiles';
+    }
+    return parsedUrl.toString();
+  } catch {
+    return fallbackUrl;
+  }
+}
+
 // Tiles URL: use VITE_TILES_URL env var if set (e.g. Cloudflare R2 public bucket),
 // otherwise fall back to the locally-served file for dev.
-const tilesUrl: string = (import.meta.env.VITE_TILES_URL as string | undefined)
-  ?? `${window.location.origin}/tiles/uk.pmtiles`;
+const tilesUrl = resolveTilesUrl(import.meta.env.VITE_TILES_URL as string | undefined);
 
 const map = new maplibregl.Map({
   container: 'map',
