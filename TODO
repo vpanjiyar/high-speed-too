@@ -1,7 +1,6 @@
 Things that might be good:
 
 Animations
-More census data
 Snap to existing lines
 
 Make panels adjustable
@@ -14,5 +13,6 @@ Big refactor ?
 Custom theme for brand
 Icon !
 
+DONE: More census data
 DONE: Acceleration Graph
 DONE: Reorder stations
