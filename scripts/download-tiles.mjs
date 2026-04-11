@@ -46,10 +46,11 @@ function cliDownloadUrl() {
   const arch = process.arch === 'x64'   ? 'x86_64'
              : process.arch === 'arm64' ? 'arm64'
              : 'x86_64';
-  const ext  = IS_WIN ? 'zip' : 'tar.gz';
+  const ext  = IS_WIN || process.platform === 'darwin' ? 'zip' : 'tar.gz';
+  const seperator = process.platform === 'darwin' ? '-' : '_';
   return (
     `https://github.com/protomaps/go-pmtiles/releases/download/` +
-    `v${PMTILES_VERSION}/go-pmtiles_${PMTILES_VERSION}_${os}_${arch}.${ext}`
+    `v${PMTILES_VERSION}/go-pmtiles${seperator}${PMTILES_VERSION}_${os}_${arch}.${ext}`
   );
 }
 

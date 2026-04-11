@@ -357,7 +357,7 @@ export interface LineTrainStats {
   totalCapacity: number;
   /** Trains per hour (if enough units assigned) */
   trainsPerHour: number;
-  /** Passengers per hour per direction */
+  /** Supplied carrying capacity per hour per direction */
   passengersThroughput: number;
 }
 

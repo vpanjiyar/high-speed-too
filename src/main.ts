@@ -11,8 +11,11 @@ import { LINE_COLORS } from './network';
 import type { NetworkExport } from './network';
 import { validateNetworkExport } from './network';
 import { fetchCatchmentStats, preloadLsoa, fetchLineCatchmentStats } from './station-manager';
+import type { CatchmentStats } from './station-manager';
 import { ROLLING_STOCK, ROLLING_STOCK_CATEGORIES, getRollingStock, computeLineStats } from './rolling-stock';
 import type { RollingStock, LineTrainStats, JourneyProfileSegment } from './rolling-stock';
+import { estimateLineDemand } from './line-demand';
+import type { LineDemandModel } from './line-demand';
 import { buildExportPreviewHTML, openExportPage } from './map-export';
 import type { ExportStyle } from './map-export';
 
@@ -38,6 +41,35 @@ type ActiveVisibilityMotion = {
   animations: Animation[];
 };
 
+const COMPACT_PANEL_BREAKPOINT = 840;
+
+type ResizeAxis = 'inline' | 'block' | 'both';
+type ResizeHandleRole = 'corner' | 'edge-inline-start' | 'edge-block-start' | 'edge-block-end';
+type ResizeLayoutMode = 'desktop' | 'mobile';
+
+type ResizeLayoutConfig = {
+  axis: ResizeAxis;
+  handleRole: ResizeHandleRole;
+  minInline?: number;
+  maxInline?: (viewportWidth: number) => number;
+  defaultInline?: number;
+  minBlock?: number;
+  maxBlock?: (viewportHeight: number) => number;
+  defaultBlock?: number;
+};
+
+type ResizablePanelConfig = {
+  storageKey: string;
+  label: string;
+  element: HTMLElement;
+  inlineCssVar?: string;
+  blockCssVar?: string;
+  desktop: ResizeLayoutConfig;
+  mobile: ResizeLayoutConfig;
+};
+
+type StoredPanelDimensions = Partial<Record<ResizeLayoutMode, { inline?: number; block?: number }>>;
+
 const activeVisibilityMotions = new WeakMap<HTMLElement, ActiveVisibilityMotion>();
 
 function getVisibilityMotion(
@@ -49,6 +81,24 @@ function getVisibilityMotion(
 
   switch (preset) {
     case 'drawer':
+      if (window.matchMedia(`(max-width: ${COMPACT_PANEL_BREAKPOINT}px)`).matches) {
+        return {
+          duration: visible ? 240 : 150,
+          easing: visible ? enterEasing : exitEasing,
+          root: visible
+            ? [
+                { opacity: 0, transform: 'translateY(34px) scale(0.985)' },
+                { opacity: 1, transform: 'translateY(-6px) scale(1.01)', offset: 0.72 },
+                { opacity: 1, transform: 'translateY(0) scale(1)' },
+              ]
+            : [
+                { opacity: 1, transform: 'translateY(0) scale(1)' },
+                { opacity: 0.78, transform: 'translateY(8px) scale(0.992)', offset: 0.45 },
+                { opacity: 0, transform: 'translateY(28px) scale(0.97)' },
+              ],
+        };
+      }
+
       return {
         duration: visible ? 240 : 150,
         easing: visible ? enterEasing : exitEasing,
@@ -452,25 +502,328 @@ map.on('load', () => {
   const trainPickerModalEl = document.getElementById('train-picker-modal')!;
   const importModalEl = document.getElementById('import-modal')!;
   const journeyProfileModalEl = document.getElementById('journey-profile-modal')!;
+  const lineDemandModalEl = document.getElementById('line-demand-modal')!;
   const journeyProfileChartEl = document.getElementById('journey-profile-chart')!;
   const journeyProfileTooltipEl = document.getElementById('journey-profile-tooltip')!;
   const journeyProfileHoverReadoutEl = document.getElementById('journey-profile-hover-readout')!;
+  const panelRoot = document.documentElement;
+  const compactPanelsQuery = window.matchMedia(`(max-width: ${COMPACT_PANEL_BREAKPOINT}px)`);
+  const panelSizeCache = new Map<string, StoredPanelDimensions>();
+
+  function getResizeMode(): ResizeLayoutMode {
+    return compactPanelsQuery.matches ? 'mobile' : 'desktop';
+  }
+
+  function getResizeLayout(config: ResizablePanelConfig, mode = getResizeMode()): ResizeLayoutConfig {
+    return mode === 'mobile' ? config.mobile : config.desktop;
+  }
+
+  function loadStoredPanelDimensions(storageKey: string): StoredPanelDimensions {
+    const cached = panelSizeCache.get(storageKey);
+    if (cached) return cached;
+
+    try {
+      const raw = window.localStorage.getItem(`hst.panel.${storageKey}`);
+      const parsed = raw ? JSON.parse(raw) as StoredPanelDimensions : {};
+      panelSizeCache.set(storageKey, parsed);
+      return parsed;
+    } catch {
+      const fallback: StoredPanelDimensions = {};
+      panelSizeCache.set(storageKey, fallback);
+      return fallback;
+    }
+  }
+
+  function saveStoredPanelDimensions(storageKey: string, dimensions: StoredPanelDimensions): void {
+    panelSizeCache.set(storageKey, dimensions);
+    try {
+      window.localStorage.setItem(`hst.panel.${storageKey}`, JSON.stringify(dimensions));
+    } catch {
+      // Ignore storage failures; resizing should still work for the current session.
+    }
+  }
+
+  function applyPanelDimensions(
+    config: ResizablePanelConfig,
+    dimensions: { inline?: number; block?: number },
+    persist = false,
+    forcedMode?: ResizeLayoutMode,
+  ): void {
+    const mode = forcedMode ?? getResizeMode();
+    const layout = getResizeLayout(config, mode);
+    const current = loadStoredPanelDimensions(config.storageKey);
+    const nextForMode = { ...(current[mode] ?? {}) };
+
+    if (config.inlineCssVar && layout.axis !== 'block') {
+      const baseInline = dimensions.inline ?? nextForMode.inline ?? layout.defaultInline;
+      if (typeof baseInline === 'number') {
+        const maxInline = layout.maxInline?.(window.innerWidth) ?? baseInline;
+        const clampedInline = clamp(baseInline, layout.minInline ?? baseInline, maxInline);
+        panelRoot.style.setProperty(config.inlineCssVar, `${clampedInline}px`);
+        nextForMode.inline = clampedInline;
+      }
+    }
+
+    if (config.blockCssVar && layout.axis !== 'inline') {
+      const baseBlock = dimensions.block ?? nextForMode.block ?? layout.defaultBlock;
+      if (typeof baseBlock === 'number') {
+        const maxBlock = layout.maxBlock?.(window.innerHeight) ?? baseBlock;
+        const clampedBlock = clamp(baseBlock, layout.minBlock ?? baseBlock, maxBlock);
+        panelRoot.style.setProperty(config.blockCssVar, `${clampedBlock}px`);
+        nextForMode.block = clampedBlock;
+      }
+    }
+
+    if (!persist) return;
+
+    saveStoredPanelDimensions(config.storageKey, {
+      ...current,
+      [mode]: nextForMode,
+    });
+  }
+
+  function getInlinePointerDelta(role: ResizeHandleRole, deltaX: number): number {
+    return role === 'edge-inline-start' ? -deltaX : deltaX;
+  }
+
+  function getBlockPointerDelta(role: ResizeHandleRole, deltaY: number): number {
+    return role === 'edge-block-start' ? -deltaY : deltaY;
+  }
+
+  function getBlockKeyboardDelta(role: ResizeHandleRole, key: string, step: number): number | null {
+    if (key !== 'ArrowUp' && key !== 'ArrowDown') return null;
+
+    if (role === 'edge-block-start') {
+      return key === 'ArrowUp' ? step : -step;
+    }
+
+    return key === 'ArrowDown' ? step : -step;
+  }
+
+  function setupResizablePanel(config: ResizablePanelConfig): void {
+    const handle = document.createElement('button');
+    handle.type = 'button';
+    handle.className = 'panel-resize-handle';
+    handle.setAttribute('role', 'separator');
+    config.element.appendChild(handle);
+
+    const syncHandle = (): void => {
+      const layout = getResizeLayout(config);
+      handle.dataset.resizeRole = layout.handleRole;
+      handle.title = `Resize ${config.label}`;
+      handle.setAttribute('aria-label', `Resize ${config.label}`);
+      handle.setAttribute('aria-orientation', layout.axis === 'block' ? 'horizontal' : 'vertical');
+    };
+
+    const syncLayout = (): void => {
+      const mode = getResizeMode();
+      const layout = getResizeLayout(config, mode);
+      const stored = loadStoredPanelDimensions(config.storageKey)[mode] ?? {};
+
+      applyPanelDimensions(config, {
+        inline: stored.inline ?? layout.defaultInline,
+        block: stored.block ?? layout.defaultBlock,
+      }, false, mode);
+      syncHandle();
+    };
+
+    handle.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+
+      const mode = getResizeMode();
+      const layout = getResizeLayout(config, mode);
+      const startRect = config.element.getBoundingClientRect();
+      const startX = event.clientX;
+      const startY = event.clientY;
+
+      event.preventDefault();
+      handle.setPointerCapture(event.pointerId);
+      document.body.classList.add('panel-resizing');
+      config.element.classList.add('is-resizing');
+      handle.dataset.resizeActive = 'true';
+
+      const onPointerMove = (moveEvent: PointerEvent): void => {
+        const nextDimensions: { inline?: number; block?: number } = {};
+
+        if (layout.axis !== 'block') {
+          nextDimensions.inline = startRect.width + getInlinePointerDelta(layout.handleRole, moveEvent.clientX - startX);
+        }
+
+        if (layout.axis !== 'inline') {
+          nextDimensions.block = startRect.height + getBlockPointerDelta(layout.handleRole, moveEvent.clientY - startY);
+        }
+
+        applyPanelDimensions(config, nextDimensions, false, mode);
+      };
+
+      const finishResize = (): void => {
+        handle.releasePointerCapture(event.pointerId);
+        handle.removeEventListener('pointermove', onPointerMove);
+        document.body.classList.remove('panel-resizing');
+        config.element.classList.remove('is-resizing');
+        delete handle.dataset.resizeActive;
+
+        applyPanelDimensions(config, {
+          inline: config.element.getBoundingClientRect().width,
+          block: config.element.getBoundingClientRect().height,
+        }, true, mode);
+      };
+
+      handle.addEventListener('pointermove', onPointerMove);
+      handle.addEventListener('pointerup', finishResize, { once: true });
+      handle.addEventListener('pointercancel', finishResize, { once: true });
+    });
+
+    handle.addEventListener('keydown', (event) => {
+      const layout = getResizeLayout(config);
+      const step = event.shiftKey ? 40 : 16;
+      const rect = config.element.getBoundingClientRect();
+      const nextDimensions: { inline?: number; block?: number } = {
+        inline: rect.width,
+        block: rect.height,
+      };
+      let handled = false;
+
+      if (layout.axis !== 'block' && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+        nextDimensions.inline = rect.width + (event.key === 'ArrowRight' ? step : -step);
+        handled = true;
+      }
+
+      if (layout.axis !== 'inline') {
+        const blockDelta = getBlockKeyboardDelta(layout.handleRole, event.key, step);
+        if (blockDelta !== null) {
+          nextDimensions.block = rect.height + blockDelta;
+          handled = true;
+        }
+      }
+
+      if (!handled) return;
+
+      event.preventDefault();
+      applyPanelDimensions(config, nextDimensions, true);
+    });
+
+    syncLayout();
+    compactPanelsQuery.addEventListener('change', syncLayout);
+    window.addEventListener('resize', syncLayout);
+  }
+
+  setupResizablePanel({
+    storageKey: 'overlays-panel',
+    label: 'Overlays panel',
+    element: document.getElementById('overlays-panel') as HTMLElement,
+    inlineCssVar: '--overlays-width',
+    blockCssVar: '--overlays-height',
+    desktop: {
+      axis: 'both',
+      handleRole: 'corner',
+      minInline: 212,
+      maxInline: (viewportWidth) => Math.max(212, Math.min(380, viewportWidth - 32)),
+      defaultInline: 272,
+      minBlock: 260,
+      maxBlock: (viewportHeight) => Math.max(260, viewportHeight - 136),
+      defaultBlock: 540,
+    },
+    mobile: {
+      axis: 'block',
+      handleRole: 'edge-block-end',
+      minBlock: 196,
+      maxBlock: (viewportHeight) => Math.max(196, viewportHeight - 264),
+      defaultBlock: 320,
+    },
+  });
+
+  setupResizablePanel({
+    storageKey: 'line-panel',
+    label: 'Line panel',
+    element: linePanelEl,
+    inlineCssVar: '--line-panel-width',
+    blockCssVar: '--line-panel-height',
+    desktop: {
+      axis: 'both',
+      handleRole: 'corner',
+      minInline: 220,
+      maxInline: (viewportWidth) => Math.max(220, Math.min(400, viewportWidth - 32)),
+      defaultInline: 296,
+      minBlock: 250,
+      maxBlock: (viewportHeight) => Math.max(250, viewportHeight - 164),
+      defaultBlock: 420,
+    },
+    mobile: {
+      axis: 'block',
+      handleRole: 'edge-block-start',
+      minBlock: 220,
+      maxBlock: (viewportHeight) => Math.max(220, viewportHeight - 286),
+      defaultBlock: 300,
+    },
+  });
+
+  setupResizablePanel({
+    storageKey: 'station-manager',
+    label: 'Station Manager',
+    element: smEl,
+    inlineCssVar: '--station-manager-width',
+    blockCssVar: '--station-manager-height',
+    desktop: {
+      axis: 'inline',
+      handleRole: 'edge-inline-start',
+      minInline: 260,
+      maxInline: (viewportWidth) => Math.max(260, Math.min(440, Math.round(viewportWidth * 0.42))),
+      defaultInline: 300,
+    },
+    mobile: {
+      axis: 'block',
+      handleRole: 'edge-block-start',
+      minBlock: 220,
+      maxBlock: (viewportHeight) => Math.max(220, viewportHeight - 226),
+      defaultBlock: 300,
+    },
+  });
+
+  setupResizablePanel({
+    storageKey: 'line-manager',
+    label: 'Line Manager',
+    element: lmEl,
+    inlineCssVar: '--line-manager-width',
+    blockCssVar: '--line-manager-height',
+    desktop: {
+      axis: 'inline',
+      handleRole: 'edge-inline-start',
+      minInline: 280,
+      maxInline: (viewportWidth) => Math.max(280, Math.min(480, Math.round(viewportWidth * 0.48))),
+      defaultInline: 340,
+    },
+    mobile: {
+      axis: 'block',
+      handleRole: 'edge-block-start',
+      minBlock: 240,
+      maxBlock: (viewportHeight) => Math.max(240, viewportHeight - 226),
+      defaultBlock: 360,
+    },
+  });
 
   // ── Line Manager helpers ────────────────────────────────────────────────
 
   let openLineId: string | null = null;
   let openJourneyProfileLineId: string | null = null;
+  let openLineDemandLineId: string | null = null;
   /** Stable signature of station IDs for the open line — used to gate census re-fetches. */
   let openLineStopSig = '';
   let lmDragSourceIndex: number | null = null;
   let lmSuppressStopClick = false;
+  const lineCatchmentStatsByLine = new Map<string, CatchmentStats | null>();
 
   function closeLineManager(): void {
     hideAnimatedClass(lmEl, 'drawer');
     smEl.classList.remove('lm-open');
     closeJourneyProfileModal();
+    closeLineDemandModal();
     openLineId = null;
     openLineStopSig = '';
+  }
+
+  function getLineCatchmentStats(lineId: string): CatchmentStats | null {
+    return lineCatchmentStatsByLine.get(lineId) ?? null;
   }
 
   function renderLmSwatches(lineId: string): void {
@@ -963,6 +1316,92 @@ map.on('load', () => {
     renderJourneyProfileModal(openJourneyProfileLineId);
   }
 
+  function getLineDemandModel(lineId: string): LineDemandModel | null {
+    const line = editor.network.getLine(lineId);
+    if (!line?.rollingStockId) return null;
+
+    const stats = getLineTravelStats(lineId);
+    const stock = getRollingStock(line.rollingStockId);
+    const catchment = getLineCatchmentStats(lineId);
+    if (!stats || !stock || !catchment || catchment.lsoaCount === 0) return null;
+
+    return estimateLineDemand(stats, catchment, stock, line.stationIds.length);
+  }
+
+  function renderLineDemandModal(lineId: string): void {
+    const line = editor.network.getLine(lineId);
+    const stats = getLineTravelStats(lineId);
+    const demand = getLineDemandModel(lineId);
+    if (!line || !stats || !demand) {
+      closeLineDemandModal();
+      return;
+    }
+
+    const stock = line.rollingStockId ? getRollingStock(line.rollingStockId) : null;
+    const modalBox = lineDemandModalEl.querySelector<HTMLElement>('.line-demand-box');
+    modalBox?.style.setProperty('--journey-line-color', line.color);
+
+    document.getElementById('line-demand-subtitle')!.textContent = stock
+      ? `${line.name} · ${stock.designation} ${stock.name}`
+      : line.name;
+    document.getElementById('line-demand-summary')!.textContent = demand.summary;
+    document.getElementById('line-demand-estimate')!.textContent = demand.estimatedPassengersPerHour.toLocaleString('en-GB');
+    document.getElementById('line-demand-band')!.textContent = demand.popularityBand;
+    document.getElementById('line-demand-score')!.textContent = `${demand.popularityScore}/100`;
+    document.getElementById('line-demand-utilisation')!.textContent = `${demand.capacityUtilisationPct.toFixed(1)}%`;
+    document.getElementById('line-demand-catchment')!.textContent = demand.catchment.residents.toLocaleString('en-GB');
+
+    document.getElementById('line-demand-base-market')!.textContent = `${demand.baseMarketPassengersPerHour.toLocaleString('en-GB')} pax/hr`;
+    document.getElementById('line-demand-propensity')!.textContent = `${demand.propensityFactor.toFixed(2)}x`;
+    document.getElementById('line-demand-service-factor')!.textContent = `${demand.serviceFactor.toFixed(2)}x`;
+    document.getElementById('line-demand-capacity')!.textContent = `${demand.suppliedCapacityPerHour.toLocaleString('en-GB')} pax/hr`;
+
+    document.getElementById('line-demand-working-age')!.textContent = `${demand.catchment.workingAgePct.toFixed(1)}% working age`;
+    document.getElementById('line-demand-density')!.textContent = `${demand.catchment.densityPerHa.toFixed(1)} pop/ha`;
+    document.getElementById('line-demand-no-car')!.textContent = `${demand.catchment.noCarPct.toFixed(1)}% no car`;
+    document.getElementById('line-demand-train-share')!.textContent = `${demand.catchment.trainCommutersPct.toFixed(1)}% already commute by rail`;
+    document.getElementById('line-demand-drive-share')!.textContent = `${demand.catchment.driveCommutersPct.toFixed(1)}% commute by car`;
+    document.getElementById('line-demand-renters')!.textContent = `${demand.catchment.rentersPct.toFixed(1)}% renters`;
+
+    document.getElementById('line-demand-frequency')!.textContent = `${demand.service.trainsPerHour} tph`;
+    document.getElementById('line-demand-journey-time')!.textContent = `${demand.service.endToEndMin.toFixed(1)} min end-to-end`;
+    document.getElementById('line-demand-average-speed')!.textContent = `${demand.service.averageSpeedKmh.toFixed(1)} km/h average`;
+    document.getElementById('line-demand-stop-spacing')!.textContent = `${demand.service.stopSpacingKm.toFixed(1)} km average spacing`;
+    document.getElementById('line-demand-wait-time')!.textContent = `${demand.service.averageWaitTimeMin.toFixed(1)} min average wait`;
+    document.getElementById('line-demand-stock-fit')!.textContent = `${demand.service.stockFitFactor.toFixed(2)}x stock fit`;
+
+    document.getElementById('line-demand-latent-demand')!.textContent = demand.demandConstrainedByCapacity
+      ? `${demand.unconstrainedPassengersPerHour.toLocaleString('en-GB')} pax/hr latent demand`
+      : 'Demand currently sits within supplied capacity';
+    document.getElementById('line-demand-methodology')!.textContent = demand.methodology;
+  }
+
+  function openLineDemandModal(lineId: string): void {
+    const demand = getLineDemandModel(lineId);
+    if (!demand) return;
+
+    openLineDemandLineId = lineId;
+    renderLineDemandModal(lineId);
+    showAnimatedClass(lineDemandModalEl, 'modal', '.line-demand-box');
+  }
+
+  function closeLineDemandModal(): void {
+    hideAnimatedClass(lineDemandModalEl, 'modal', '.line-demand-box');
+    openLineDemandLineId = null;
+  }
+
+  function refreshLineDemandModal(): void {
+    if (!openLineDemandLineId) return;
+
+    const line = editor.network.getLine(openLineDemandLineId);
+    if (!line || !getLineDemandModel(openLineDemandLineId)) {
+      closeLineDemandModal();
+      return;
+    }
+
+    renderLineDemandModal(openLineDemandLineId);
+  }
+
   function getLineTravelStats(lineId: string) {
     const line = editor.network.getLine(lineId);
     if (!line?.rollingStockId) return null;
@@ -1177,6 +1616,8 @@ map.on('load', () => {
     hideAnimatedDisplay(grid, 'section');
     showAnimatedClass(loadingEl, 'section');
     hideAnimatedClass(errorEl, 'section');
+    lineCatchmentStatsByLine.delete(lineId);
+    refreshLineStats(lineId);
 
     const stations = line.stationIds
       .map((id) => editor.network.getStation(id))
@@ -1186,21 +1627,30 @@ map.on('load', () => {
       if (openLineId !== lineId) return;
       hideAnimatedClass(loadingEl, 'section');
       if (stats.lsoaCount === 0) {
+        lineCatchmentStatsByLine.set(lineId, null);
         errorEl.textContent = line.stationIds.length === 0
           ? 'Add stops to see catchment data.'
           : 'No census data nearby.';
         showAnimatedClass(errorEl, 'section');
+        refreshLineStats(lineId);
+        refreshLineDemandModal();
         return;
       }
+      lineCatchmentStatsByLine.set(lineId, stats);
       document.getElementById('lm-stat-pop')!.textContent     = stats.population.toLocaleString('en-GB');
       document.getElementById('lm-stat-workers')!.textContent  = stats.workingAge.toLocaleString('en-GB');
       document.getElementById('lm-stat-pct')!.textContent      = `${stats.workingAgePct.toFixed(1)}%`;
       document.getElementById('lm-stat-density')!.textContent  = stats.densityPerHa.toFixed(1);
       showAnimatedDisplay(grid, 'section', 'grid');
+      refreshLineStats(lineId);
+      refreshLineDemandModal();
     }).catch(() => {
       hideAnimatedClass(loadingEl, 'section');
+      lineCatchmentStatsByLine.set(lineId, null);
       errorEl.textContent = 'Failed to load census data.';
       showAnimatedClass(errorEl, 'section');
+      refreshLineStats(lineId);
+      refreshLineDemandModal();
     });
   }
 
@@ -1258,7 +1708,24 @@ map.on('load', () => {
     document.getElementById('lm-ls-totalcost')!.textContent = `£${stats.totalCostM.toFixed(1)}M`;
     document.getElementById('lm-ls-capacity')!.textContent = stats.totalCapacity.toLocaleString('en-GB');
     document.getElementById('lm-ls-tph')!.textContent = `${stats.trainsPerHour}`;
-    document.getElementById('lm-ls-pax')!.textContent = stats.passengersThroughput.toLocaleString('en-GB');
+
+    const demandCard = document.getElementById('lm-open-demand-model') as HTMLButtonElement;
+    const demandValueEl = document.getElementById('lm-ls-demand')!;
+    const demandBandEl = document.getElementById('lm-ls-demand-band')!;
+    const demand = getLineDemandModel(lineId);
+    const hasCatchmentState = lineCatchmentStatsByLine.has(lineId);
+
+    if (demand) {
+      demandValueEl.textContent = demand.estimatedPassengersPerHour.toLocaleString('en-GB');
+      demandBandEl.textContent = `${demand.popularityBand} · ${demand.popularityScore}/100`;
+      demandCard.disabled = false;
+      demandCard.title = 'View line popularity model';
+    } else {
+      demandValueEl.textContent = '—';
+      demandBandEl.textContent = hasCatchmentState ? 'No census model available' : 'Loading census model';
+      demandCard.disabled = true;
+      demandCard.title = hasCatchmentState ? 'Popularity model unavailable for this line' : 'Loading census model';
+    }
   }
 
   function openTrainPicker(lineId: string): void {
@@ -1504,6 +1971,7 @@ map.on('load', () => {
     }
 
     refreshJourneyProfileModal();
+    refreshLineDemandModal();
 
     renderLineList(state);
   }
@@ -1664,6 +2132,9 @@ map.on('load', () => {
   document.getElementById('lm-open-journey-profile')!.addEventListener('click', () => {
     if (openLineId) openJourneyProfileModal(openLineId);
   });
+  document.getElementById('lm-open-demand-model')!.addEventListener('click', () => {
+    if (openLineId) openLineDemandModal(openLineId);
+  });
 
   // ── Rolling stock wiring ──────────────────────────────────────────────
 
@@ -1729,6 +2200,18 @@ map.on('load', () => {
     }
   });
 
+  document.getElementById('line-demand-close')!.addEventListener('click', () => {
+    closeLineDemandModal();
+  });
+  document.getElementById('line-demand-dismiss')!.addEventListener('click', () => {
+    closeLineDemandModal();
+  });
+  lineDemandModalEl.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) {
+      closeLineDemandModal();
+    }
+  });
+
   // Color swatches for new line
   const colorContainer = document.getElementById('new-line-colors')!;
   const snapCheckbox = document.getElementById('new-line-snap') as HTMLInputElement;
@@ -1785,6 +2268,11 @@ map.on('load', () => {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !journeyProfileModalEl.classList.contains('hidden')) {
       closeJourneyProfileModal();
+      return;
+    }
+
+    if (e.key === 'Escape' && !lineDemandModalEl.classList.contains('hidden')) {
+      closeLineDemandModal();
       return;
     }
 
