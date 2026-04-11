@@ -399,6 +399,19 @@ html, body {
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
   min-width: 192px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,0.15) transparent;
+}
+
+#overlays-panel::-webkit-scrollbar {
+  width: 5px;
+}
+
+#overlays-panel::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.15);
+  border-radius: 3px;
 }
 
 #overlays-header {
@@ -413,9 +426,83 @@ html, body {
   letter-spacing: 0.6px;
 }
 
+/* Accordion sections */
+.overlay-accordion {
+  margin-top: 2px;
+}
+
+.overlay-accordion summary {
+  list-style: none;
+}
+
+.overlay-accordion summary::-webkit-details-marker {
+  display: none;
+}
+
+.overlay-accordion-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #444;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  padding: 4px 0;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.overlay-accordion-header::before {
+  content: '▸';
+  display: inline-block;
+  font-size: 10px;
+  transition: transform 0.15s;
+  color: #888;
+}
+
+.overlay-accordion[open] > .overlay-accordion-header::before {
+  transform: rotate(90deg);
+}
+
+.overlay-accordion-body {
+  padding: 4px 0 2px 6px;
+}
+
+/* Census top row with Off toggle */
+.census-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+.census-off-toggle {
+  margin-left: auto;
+}
+
+/* Census accordion sub-headers (slightly smaller than rail) */
+.census-accordion > .overlay-accordion-header {
+  font-size: 10.5px;
+  color: #555;
+  padding: 3px 0;
+}
+
 /* Section within the panel */
 .overlay-section {
   margin-top: 2px;
+}
+
+/* Census metrics fieldset inside accordion */
+.census-metrics-group {
+  border: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
 
 .overlay-section-heading {
@@ -505,15 +592,7 @@ html, body {
   color: #1a1a2e;
 }
 
-/* Census metric radio group */
-#census-metrics {
-  border: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
+/* Census metric radio group (rendered inside accordions) */
 
 .census-radio {
   display: flex;
@@ -577,9 +656,18 @@ html, body {
   opacity: 1;
 }
 
-.census-swatch--population  { background: linear-gradient(to right, #c6dbef, #08306b); }
-.census-swatch--density     { background: linear-gradient(to right, #fee391, #662506); }
-.census-swatch--working_age { background: linear-gradient(to right, #c7e9b4, #0c2c84); }
+.census-swatch--population        { background: linear-gradient(to right, #c6dbef, #08306b); }
+.census-swatch--density           { background: linear-gradient(to right, #fee391, #662506); }
+.census-swatch--working_age       { background: linear-gradient(to right, #c7e9b4, #0c2c84); }
+.census-swatch--elderly           { background: linear-gradient(to right, #cbc9e2, #54278f); }
+.census-swatch--youth             { background: linear-gradient(to right, #ccece6, #00441b); }
+.census-swatch--no_car            { background: linear-gradient(to right, #fcbba1, #67000d); }
+.census-swatch--train_commuters   { background: linear-gradient(to right, #c6dbef, #08306b); }
+.census-swatch--bus_commuters     { background: linear-gradient(to right, #fed976, #bd0026); }
+.census-swatch--drives_to_work    { background: linear-gradient(to right, #d9d9d9, #252525); }
+.census-swatch--economic_activity { background: linear-gradient(to right, #c7e9c0, #00441b); }
+.census-swatch--renters           { background: linear-gradient(to right, #fcc5c0, #7a0177); }
+.census-swatch--disability        { background: linear-gradient(to right, #fdd0a2, #7f2704); }
 
 .census-radio-label {
   font-size: 12px;

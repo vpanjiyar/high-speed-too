@@ -1,6 +1,10 @@
 // ── Network data model ────────────────────────────────────────────────────────
 // Stations, lines, and the network container with localStorage persistence.
 
+import { sanitizePathCoordinates } from './network-geometry';
+
+export type LinePathCoordinate = [number, number];
+
 export interface Station {
   id: string;
   name: string;
@@ -15,6 +19,10 @@ export interface Line {
   name: string;
   color: string;
   stationIds: string[];
+  /** Optional stored geometry for each station-to-station segment. */
+  segmentPaths?: Array<LinePathCoordinate[] | null>;
+  /** Prefer reusing existing track when extending this line. */
+  snapToExisting?: boolean;
   /** Rolling stock ID from the catalogue (optional). */
   rollingStockId?: string;
   /** Number of train units assigned to this line. */
@@ -55,6 +63,14 @@ export function validateNetworkExport(raw: unknown): raw is NetworkExport {
     const ln = l as Record<string, unknown>;
     if (typeof ln['id'] !== 'string' || typeof ln['name'] !== 'string') return false;
     if (typeof ln['color'] !== 'string' || !Array.isArray(ln['stationIds'])) return false;
+    if ('snapToExisting' in ln && typeof ln['snapToExisting'] !== 'boolean') return false;
+    if ('segmentPaths' in ln) {
+      if (!Array.isArray(ln['segmentPaths'])) return false;
+      for (const path of ln['segmentPaths']) {
+        if (path === null) continue;
+        if (sanitizePathCoordinates(path) === null) return false;
+      }
+    }
   }
   return true;
 }
@@ -128,6 +144,51 @@ export class Network {
 
   // ── Stations ───────────────────────────────────────────────────────────────
 
+  private _normalizeLine(line: Line): Line {
+    const segmentCount = Math.max(0, line.stationIds.length - 1);
+    const normalizedPaths: Array<LinePathCoordinate[] | null> = [];
+    for (let index = 0; index < segmentCount; index++) {
+      normalizedPaths.push(sanitizePathCoordinates(line.segmentPaths?.[index] ?? null));
+    }
+
+    return {
+      ...line,
+      snapToExisting: line.snapToExisting === true ? true : undefined,
+      segmentPaths: normalizedPaths.some((path) => path !== null) ? normalizedPaths : undefined,
+    };
+  }
+
+  private _rebuildSegmentPaths(line: Line, nextStationIds: string[]): Array<LinePathCoordinate[] | null> | undefined {
+    const normalized = this._normalizeLine(line);
+    const rebuilt: Array<LinePathCoordinate[] | null> = [];
+
+    for (let index = 0; index < nextStationIds.length - 1; index++) {
+      const fromId = nextStationIds[index];
+      const toId = nextStationIds[index + 1];
+      let preserved: LinePathCoordinate[] | null = null;
+
+      for (let oldIndex = 0; oldIndex < normalized.stationIds.length - 1; oldIndex++) {
+        const oldFromId = normalized.stationIds[oldIndex];
+        const oldToId = normalized.stationIds[oldIndex + 1];
+        const oldPath = normalized.segmentPaths?.[oldIndex] ?? null;
+        if (!fromId || !toId || !oldFromId || !oldToId || !oldPath) continue;
+
+        if (oldFromId === fromId && oldToId === toId) {
+          preserved = oldPath.map(([lng, lat]) => [lng, lat] as LinePathCoordinate);
+          break;
+        }
+        if (oldFromId === toId && oldToId === fromId) {
+          preserved = [...oldPath].reverse().map(([lng, lat]) => [lng, lat] as LinePathCoordinate);
+          break;
+        }
+      }
+
+      rebuilt.push(preserved);
+    }
+
+    return rebuilt.some((path) => path !== null) ? rebuilt : undefined;
+  }
+
   addStation(lng: number, lat: number, name?: string, atco?: string): Station {
     const station: Station = {
       id: generateId('stn'),
@@ -150,7 +211,10 @@ export class Network {
     this.stations = this.stations.filter((s) => s.id !== id);
     // Remove from all lines
     for (const line of this.lines) {
-      line.stationIds = line.stationIds.filter((sid) => sid !== id);
+      const nextStationIds = line.stationIds.filter((sid) => sid !== id);
+      const previousLine = this._normalizeLine(line);
+      line.stationIds = nextStationIds;
+      line.segmentPaths = this._rebuildSegmentPaths(previousLine, nextStationIds);
     }
     this._emit();
   }
@@ -169,12 +233,13 @@ export class Network {
 
   // ── Lines ──────────────────────────────────────────────────────────────────
 
-  addLine(name: string, color: string): Line {
+  addLine(name: string, color: string, snapToExisting = false): Line {
     const line: Line = {
       id: generateId('line'),
       name,
       color,
       stationIds: [],
+      ...(snapToExisting ? { snapToExisting: true } : {}),
     };
     this.lines.push(line);
     this._emit();
@@ -218,19 +283,35 @@ export class Network {
     }
   }
 
-  addStationToLine(lineId: string, stationId: string): void {
+  setLineSnapToExisting(id: string, snapToExisting: boolean): void {
+    const l = this.lines.find((line) => line.id === id);
+    if (!l) return;
+    l.snapToExisting = snapToExisting ? true : undefined;
+    this._emit();
+  }
+
+  addStationToLine(lineId: string, stationId: string, segmentPath?: LinePathCoordinate[]): void {
     const line = this.lines.find((l) => l.id === lineId);
     if (!line) return;
     // Don't add duplicate consecutive station
     if (line.stationIds[line.stationIds.length - 1] === stationId) return;
+    const normalized = this._normalizeLine(line);
     line.stationIds.push(stationId);
+    if (line.stationIds.length >= 2) {
+      const nextPaths = normalized.segmentPaths ? [...normalized.segmentPaths] : [];
+      nextPaths.push(sanitizePathCoordinates(segmentPath ?? null));
+      line.segmentPaths = nextPaths.some((path) => path !== null) ? nextPaths : undefined;
+    }
     this._emit();
   }
 
   removeStationFromLine(lineId: string, index: number): void {
     const line = this.lines.find((l) => l.id === lineId);
     if (!line) return;
-    line.stationIds.splice(index, 1);
+    const previousLine = this._normalizeLine(line);
+    const nextStationIds = previousLine.stationIds.filter((_, stationIndex) => stationIndex !== index);
+    line.stationIds = nextStationIds;
+    line.segmentPaths = this._rebuildSegmentPaths(previousLine, nextStationIds);
     this._emit();
   }
 
@@ -241,8 +322,13 @@ export class Network {
     if (fromIndex < 0 || toIndex < 0) return;
     if (fromIndex >= line.stationIds.length || toIndex >= line.stationIds.length) return;
 
-    const [stationId] = line.stationIds.splice(fromIndex, 1);
-    line.stationIds.splice(toIndex, 0, stationId);
+    const previousLine = this._normalizeLine(line);
+    const nextStationIds = [...previousLine.stationIds];
+    const [stationId] = nextStationIds.splice(fromIndex, 1);
+    if (!stationId) return;
+    nextStationIds.splice(toIndex, 0, stationId);
+    line.stationIds = nextStationIds;
+    line.segmentPaths = this._rebuildSegmentPaths(previousLine, nextStationIds);
     this._emit();
   }
 
@@ -277,7 +363,7 @@ export class Network {
   importNetwork(data: NetworkData, merge: boolean): void {
     if (!merge) {
       this.stations = JSON.parse(JSON.stringify(data.stations));
-      this.lines = JSON.parse(JSON.stringify(data.lines));
+      this.lines = JSON.parse(JSON.stringify(data.lines)).map((line: Line) => this._normalizeLine(line));
     } else {
       const idMap = new Map<string, string>();
       for (const s of data.stations) {
@@ -286,11 +372,11 @@ export class Network {
         this.stations.push({ ...s, id: newId });
       }
       for (const l of data.lines) {
-        this.lines.push({
+        this.lines.push(this._normalizeLine({
           ...l,
           id: generateId('line'),
           stationIds: l.stationIds.map((sid) => idMap.get(sid) ?? sid),
-        });
+        }));
       }
     }
     this._emit();
@@ -311,7 +397,7 @@ export class Network {
       if (!raw) return;
       const data: NetworkData = JSON.parse(raw);
       if (Array.isArray(data.stations)) this.stations = data.stations;
-      if (Array.isArray(data.lines)) this.lines = data.lines;
+      if (Array.isArray(data.lines)) this.lines = data.lines.map((line) => this._normalizeLine(line));
       this._emit();
     } catch { /* corrupted data — start fresh */ }
   }

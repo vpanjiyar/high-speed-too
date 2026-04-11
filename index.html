@@ -77,71 +77,163 @@
           <span id="overlays-title">Overlays</span>
         </div>
 
-        <!-- Rail infrastructure section -->
-        <div class="overlay-section">
-          <div class="overlay-section-heading">Rail Infrastructure</div>
-          <div class="overlay-toggles">
-            <label class="overlay-toggle">
-              <input type="checkbox" id="toggle-rail-lines" checked />
-              <span class="overlay-toggle-track"></span>
-              <span class="overlay-toggle-label">National rail</span>
-            </label>
-            <label class="overlay-toggle">
-              <input type="checkbox" id="toggle-metro-lines" checked />
-              <span class="overlay-toggle-track"></span>
-              <span class="overlay-toggle-label">City metros</span>
-            </label>
-            <label class="overlay-toggle">
-              <input type="checkbox" id="toggle-rail-stations" checked />
-              <span class="overlay-toggle-track"></span>
-              <span class="overlay-toggle-label">Stations</span>
-            </label>
+        <!-- Rail infrastructure accordion -->
+        <details class="overlay-accordion" open>
+          <summary class="overlay-accordion-header">Rail Infrastructure</summary>
+          <div class="overlay-accordion-body">
+            <div class="overlay-toggles">
+              <label class="overlay-toggle">
+                <input type="checkbox" id="toggle-rail-lines" checked />
+                <span class="overlay-toggle-track"></span>
+                <span class="overlay-toggle-label">National rail</span>
+              </label>
+              <label class="overlay-toggle">
+                <input type="checkbox" id="toggle-metro-lines" checked />
+                <span class="overlay-toggle-track"></span>
+                <span class="overlay-toggle-label">City metros</span>
+              </label>
+              <label class="overlay-toggle">
+                <input type="checkbox" id="toggle-rail-stations" checked />
+                <span class="overlay-toggle-track"></span>
+                <span class="overlay-toggle-label">Stations</span>
+              </label>
+            </div>
           </div>
-        </div>
+        </details>
 
         <div class="overlay-divider"></div>
 
-        <!-- Census section -->
-        <div class="overlay-section">
+        <!-- Census section heading + off toggle -->
+        <div class="overlay-section census-top-row">
           <div class="overlay-section-heading">
             Census
             <span id="census-loading">⏳</span>
           </div>
-          <fieldset id="census-metrics">
-            <label class="census-radio">
-              <input type="radio" name="census-metric" value="off" checked />
-              <span class="census-radio-dot"></span>
-              <span class="census-radio-label">Off</span>
-            </label>
-            <label class="census-radio">
-              <input type="radio" name="census-metric" value="population" />
-              <span class="census-radio-dot"></span>
-              <span class="census-swatch census-swatch--population"></span>
-              <span class="census-radio-label">Population</span>
-            </label>
-            <label class="census-radio">
-              <input type="radio" name="census-metric" value="density" />
-              <span class="census-radio-dot"></span>
-              <span class="census-swatch census-swatch--density"></span>
-              <span class="census-radio-label">Density (pop/ha)</span>
-            </label>
-            <label class="census-radio">
-              <input type="radio" name="census-metric" value="working_age" />
-              <span class="census-radio-dot"></span>
-              <span class="census-swatch census-swatch--working_age"></span>
-              <span class="census-radio-label">Working Age %</span>
-            </label>
-          </fieldset>
-          <div id="census-legend">
-            <div id="census-legend-bar"></div>
-            <div id="census-legend-labels">
-              <span id="census-legend-min"></span>
-              <span id="census-legend-max"></span>
-            </div>
-          </div>
-          <div id="census-error"></div>
-          <div id="census-updated"></div>
+          <label class="census-radio census-off-toggle">
+            <input type="radio" name="census-metric" value="off" checked />
+            <span class="census-radio-dot"></span>
+            <span class="census-radio-label">Off</span>
+          </label>
         </div>
+
+        <!-- Demographics accordion -->
+        <details class="overlay-accordion census-accordion">
+          <summary class="overlay-accordion-header">Demographics</summary>
+          <div class="overlay-accordion-body">
+            <fieldset class="census-metrics-group">
+              <label class="census-radio">
+                <input type="radio" name="census-metric" value="population" />
+                <span class="census-radio-dot"></span>
+                <span class="census-swatch census-swatch--population"></span>
+                <span class="census-radio-label">Population</span>
+              </label>
+              <label class="census-radio">
+                <input type="radio" name="census-metric" value="density" />
+                <span class="census-radio-dot"></span>
+                <span class="census-swatch census-swatch--density"></span>
+                <span class="census-radio-label">Density (pop/ha)</span>
+              </label>
+              <label class="census-radio">
+                <input type="radio" name="census-metric" value="working_age" />
+                <span class="census-radio-dot"></span>
+                <span class="census-swatch census-swatch--working_age"></span>
+                <span class="census-radio-label">Working Age %</span>
+              </label>
+              <label class="census-radio">
+                <input type="radio" name="census-metric" value="elderly" />
+                <span class="census-radio-dot"></span>
+                <span class="census-swatch census-swatch--elderly"></span>
+                <span class="census-radio-label">Elderly (65+) %</span>
+              </label>
+              <label class="census-radio">
+                <input type="radio" name="census-metric" value="youth" />
+                <span class="census-radio-dot"></span>
+                <span class="census-swatch census-swatch--youth"></span>
+                <span class="census-radio-label">Youth (16–24) %</span>
+              </label>
+            </fieldset>
+          </div>
+        </details>
+
+        <!-- Transport accordion -->
+        <details class="overlay-accordion census-accordion">
+          <summary class="overlay-accordion-header">Transport</summary>
+          <div class="overlay-accordion-body">
+            <fieldset class="census-metrics-group">
+              <label class="census-radio">
+                <input type="radio" name="census-metric" value="no_car" />
+                <span class="census-radio-dot"></span>
+                <span class="census-swatch census-swatch--no_car"></span>
+                <span class="census-radio-label">No Car/Van %</span>
+              </label>
+              <label class="census-radio">
+                <input type="radio" name="census-metric" value="train_commuters" />
+                <span class="census-radio-dot"></span>
+                <span class="census-swatch census-swatch--train_commuters"></span>
+                <span class="census-radio-label">Train Commuters %</span>
+              </label>
+              <label class="census-radio">
+                <input type="radio" name="census-metric" value="bus_commuters" />
+                <span class="census-radio-dot"></span>
+                <span class="census-swatch census-swatch--bus_commuters"></span>
+                <span class="census-radio-label">Bus Commuters %</span>
+              </label>
+              <label class="census-radio">
+                <input type="radio" name="census-metric" value="drives_to_work" />
+                <span class="census-radio-dot"></span>
+                <span class="census-swatch census-swatch--drives_to_work"></span>
+                <span class="census-radio-label">Drives to Work %</span>
+              </label>
+            </fieldset>
+          </div>
+        </details>
+
+        <!-- Economic accordion -->
+        <details class="overlay-accordion census-accordion">
+          <summary class="overlay-accordion-header">Economic</summary>
+          <div class="overlay-accordion-body">
+            <fieldset class="census-metrics-group">
+              <label class="census-radio">
+                <input type="radio" name="census-metric" value="economic_activity" />
+                <span class="census-radio-dot"></span>
+                <span class="census-swatch census-swatch--economic_activity"></span>
+                <span class="census-radio-label">Economically Active %</span>
+              </label>
+              <label class="census-radio">
+                <input type="radio" name="census-metric" value="renters" />
+                <span class="census-radio-dot"></span>
+                <span class="census-swatch census-swatch--renters"></span>
+                <span class="census-radio-label">Renters %</span>
+              </label>
+            </fieldset>
+          </div>
+        </details>
+
+        <!-- Accessibility accordion -->
+        <details class="overlay-accordion census-accordion">
+          <summary class="overlay-accordion-header">Accessibility</summary>
+          <div class="overlay-accordion-body">
+            <fieldset class="census-metrics-group">
+              <label class="census-radio">
+                <input type="radio" name="census-metric" value="disability" />
+                <span class="census-radio-dot"></span>
+                <span class="census-swatch census-swatch--disability"></span>
+                <span class="census-radio-label">Disability %</span>
+              </label>
+            </fieldset>
+          </div>
+        </details>
+
+        <!-- Census legend + status (shared across all census metrics) -->
+        <div id="census-legend">
+          <div id="census-legend-bar"></div>
+          <div id="census-legend-labels">
+            <span id="census-legend-min"></span>
+            <span id="census-legend-max"></span>
+          </div>
+        </div>
+        <div id="census-error"></div>
+        <div id="census-updated"></div>
       </div>
 
       <div id="no-tiles-warning">

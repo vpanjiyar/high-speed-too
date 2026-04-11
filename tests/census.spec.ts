@@ -12,10 +12,11 @@ test('map page loads', async ({ page }) => {
   await expect(page.locator('#map canvas')).toBeVisible({ timeout: 15_000 });
 });
 
-test('census panel has 4 radio options', async ({ page }) => {
+test('census panel has all metric radio options', async ({ page }) => {
   await page.goto(BASE);
-  const radios = page.locator('#census-metrics input[type="radio"]');
-  await expect(radios).toHaveCount(4);
+  const radios = page.locator('input[name="census-metric"]');
+  // off + 5 demographics + 4 transport + 2 economic + 1 accessibility = 13
+  await expect(radios).toHaveCount(13);
 });
 
 test('selecting Population radio shows loading then legend', async ({ page }) => {
@@ -23,7 +24,7 @@ test('selecting Population radio shows loading then legend', async ({ page }) =>
   await waitForMapLoad(page);
 
   // Click the label wrapping the Population radio (input is visually hidden)
-  await page.locator('#census-metrics label').filter({ hasText: 'Population' }).click();
+  await page.locator('#overlays-panel label').filter({ hasText: 'Population' }).click();
 
   // Legend shows as soon as setMetric is called (even during loading)
   const legend = page.locator('#census-legend');
@@ -73,11 +74,11 @@ test('switching from Population to Density keeps overlay visible', async ({ page
   await waitForMapLoad(page);
 
   // Enable population overlay and wait for legend to appear
-  await page.locator('#census-metrics label').filter({ hasText: 'Population' }).click();
+  await page.locator('#overlays-panel label').filter({ hasText: 'Population' }).click();
   await expect(page.locator('#census-legend')).toBeVisible({ timeout: 30_000 });
 
   // Switch to density
-  await page.locator('#census-metrics label').filter({ hasText: 'Density' }).click();
+  await page.locator('#overlays-panel label').filter({ hasText: 'Density' }).click();
 
   // Legend should still be visible (fill-color changed, data already loaded)
   await expect(page.locator('#census-legend')).toBeVisible();
@@ -89,10 +90,10 @@ test('switching to Off hides legend', async ({ page }) => {
   await page.goto(BASE);
   await waitForMapLoad(page);
 
-  await page.locator('#census-metrics label').filter({ hasText: 'Population' }).click();
+  await page.locator('#overlays-panel label').filter({ hasText: 'Population' }).click();
   await expect(page.locator('#census-legend')).toBeVisible({ timeout: 30_000 });
 
-  await page.locator('#census-metrics label').filter({ hasText: 'Off' }).click();
+  await page.locator('#overlays-panel label').filter({ hasText: 'Off' }).click();
   await expect(page.locator('#census-legend')).toBeHidden();
 });
 
