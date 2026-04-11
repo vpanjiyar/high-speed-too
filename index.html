@@ -77,6 +77,8 @@
           <span id="overlays-title">Overlays</span>
         </div>
 
+        <div class="panel-scroll-region">
+
         <!-- Rail infrastructure accordion -->
         <details class="overlay-accordion" open>
           <summary class="overlay-accordion-header">Rail Infrastructure</summary>
@@ -234,6 +236,7 @@
         </div>
         <div id="census-error"></div>
         <div id="census-updated"></div>
+        </div>
       </div>
 
       <div id="no-tiles-warning">
@@ -273,6 +276,8 @@
           <button id="line-panel-close" class="panel-close" title="Close">&times;</button>
         </div>
 
+        <div class="panel-scroll-region">
+
         <!-- New line form -->
         <div id="new-line-form">
           <input id="new-line-name" type="text" placeholder="Line name…" maxlength="40" autocomplete="off" />
@@ -287,6 +292,7 @@
 
         <!-- Line list -->
         <div id="line-list"></div>
+        </div>
       </div>
 
       <!-- ── Station Manager panel (right side, shown when station selected) ── -->
@@ -452,16 +458,20 @@
           <div id="lm-line-stats" class="sm-section hidden">
             <div class="sm-section-label">Line Statistics</div>
             <div id="lm-line-stats-grid">
-              <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-distance">—</div><div class="sm-stat-label">Distance</div></div>
               <button id="lm-open-journey-profile" class="sm-stat lm-journey-card" type="button" title="View journey speed profile">
                 <div class="sm-stat-value" id="lm-ls-time">—</div>
                 <div class="sm-stat-label">End-to-end</div>
                 <div class="lm-journey-card-hint">View speed profile</div>
               </button>
+              <button id="lm-open-demand-model" class="sm-stat lm-journey-card" type="button" title="Loading census model" disabled>
+                <div class="sm-stat-value" id="lm-ls-demand">—</div>
+                <div class="sm-stat-label">Expected pax / hr</div>
+                <div class="lm-journey-card-hint" id="lm-ls-demand-band">Loading census model</div>
+              </button>
+              <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-distance">—</div><div class="sm-stat-label">Distance</div></div>
               <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-totalcost">—</div><div class="sm-stat-label">Fleet cost</div></div>
-              <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-capacity">—</div><div class="sm-stat-label">Total seats</div></div>
+              <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-capacity">—</div><div class="sm-stat-label">Fleet capacity</div></div>
               <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-tph">—</div><div class="sm-stat-label">Trains / hr</div></div>
-              <div class="sm-stat"><div class="sm-stat-value" id="lm-ls-pax">—</div><div class="sm-stat-label">Pax / hr</div></div>
             </div>
           </div>
 
@@ -568,6 +578,92 @@
 
         <div class="modal-actions">
           <button id="journey-profile-dismiss" class="modal-btn modal-btn--secondary">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Line demand modal -->
+    <div id="line-demand-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="line-demand-title">
+      <div class="modal-box line-demand-box">
+        <div class="journey-profile-header">
+          <div>
+            <div class="modal-title" id="line-demand-title">Line popularity model</div>
+            <div id="line-demand-subtitle" class="journey-profile-subtitle"></div>
+          </div>
+          <button id="line-demand-close" class="journey-profile-close" title="Close line popularity model">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 2l10 10M12 2L2 12"/></svg>
+          </button>
+        </div>
+
+        <p id="line-demand-summary" class="journey-profile-summary"></p>
+
+        <div class="line-demand-kpis">
+          <div class="line-demand-kpi">
+            <div class="line-demand-kpi-value" id="line-demand-estimate">—</div>
+            <div class="line-demand-kpi-label">Estimated pax / hr</div>
+          </div>
+          <div class="line-demand-kpi">
+            <div class="line-demand-kpi-value" id="line-demand-band">—</div>
+            <div class="line-demand-kpi-meta" id="line-demand-score">—</div>
+            <div class="line-demand-kpi-label">Popularity</div>
+          </div>
+          <div class="line-demand-kpi">
+            <div class="line-demand-kpi-value" id="line-demand-utilisation">—</div>
+            <div class="line-demand-kpi-label">Capacity use</div>
+          </div>
+          <div class="line-demand-kpi">
+            <div class="line-demand-kpi-value" id="line-demand-catchment">—</div>
+            <div class="line-demand-kpi-label">Catchment residents</div>
+          </div>
+        </div>
+
+        <div class="line-demand-grid">
+          <section class="line-demand-panel">
+            <div class="line-demand-panel-title">Demand build-up</div>
+            <div class="line-demand-panel-copy">These are the headline components used to convert nearby population into a peak-hour rail demand estimate.</div>
+            <div class="line-demand-list">
+              <div class="line-demand-row"><span>Base market</span><strong id="line-demand-base-market">—</strong></div>
+              <div class="line-demand-row"><span>Propensity factor</span><strong id="line-demand-propensity">—</strong></div>
+              <div class="line-demand-row"><span>Service factor</span><strong id="line-demand-service-factor">—</strong></div>
+              <div class="line-demand-row"><span>Supplied capacity</span><strong id="line-demand-capacity">—</strong></div>
+              <div class="line-demand-row"><span>Latent demand check</span><strong id="line-demand-latent-demand">—</strong></div>
+            </div>
+          </section>
+
+          <section class="line-demand-panel">
+            <div class="line-demand-panel-title">Catchment signals</div>
+            <div class="line-demand-panel-copy">Census 2021 data from all stop catchments combined. LSOAs are deduplicated to avoid double counting overlapping areas.</div>
+            <div class="line-demand-list">
+              <div class="line-demand-row"><span>Working age share</span><strong id="line-demand-working-age">—</strong></div>
+              <div class="line-demand-row"><span>Population density</span><strong id="line-demand-density">—</strong></div>
+              <div class="line-demand-row"><span>No-car households</span><strong id="line-demand-no-car">—</strong></div>
+              <div class="line-demand-row"><span>Existing rail mode share</span><strong id="line-demand-train-share">—</strong></div>
+              <div class="line-demand-row"><span>Drive mode share</span><strong id="line-demand-drive-share">—</strong></div>
+              <div class="line-demand-row"><span>Renting households</span><strong id="line-demand-renters">—</strong></div>
+            </div>
+          </section>
+
+          <section class="line-demand-panel">
+            <div class="line-demand-panel-title">Service signals</div>
+            <div class="line-demand-panel-copy">Service quality is used as a sketch proxy for generalised journey cost, which is standard practice in early-stage demand forecasting.</div>
+            <div class="line-demand-list">
+              <div class="line-demand-row"><span>Frequency</span><strong id="line-demand-frequency">—</strong></div>
+              <div class="line-demand-row"><span>End-to-end time</span><strong id="line-demand-journey-time">—</strong></div>
+              <div class="line-demand-row"><span>Average speed</span><strong id="line-demand-average-speed">—</strong></div>
+              <div class="line-demand-row"><span>Stop spacing</span><strong id="line-demand-stop-spacing">—</strong></div>
+              <div class="line-demand-row"><span>Average wait</span><strong id="line-demand-wait-time">—</strong></div>
+              <div class="line-demand-row"><span>Rolling-stock fit</span><strong id="line-demand-stock-fit">—</strong></div>
+            </div>
+          </section>
+
+          <section class="line-demand-panel line-demand-panel--wide">
+            <div class="line-demand-panel-title">How it was generated</div>
+            <p id="line-demand-methodology" class="line-demand-methodology"></p>
+          </section>
+        </div>
+
+        <div class="modal-actions">
+          <button id="line-demand-dismiss" class="modal-btn modal-btn--secondary">Close</button>
         </div>
       </div>
     </div>
