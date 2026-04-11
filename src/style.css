@@ -206,9 +206,20 @@ body.panel-resizing * {
   border: 1px solid rgba(0, 0, 0, 0.12);
   border-radius: 6px;
   padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
+}
+
+#title-logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  flex: 0 0 20px;
+  display: block;
 }
 
 #title-text {
