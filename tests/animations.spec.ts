@@ -28,6 +28,66 @@ async function waitForMotion(
   );
 }
 
+async function expectNoHorizontalOverflow(
+  page: import('@playwright/test').Page,
+  selector: string,
+) {
+  const metrics = await page.locator(selector).evaluate((element) => {
+    if (!(element instanceof HTMLElement)) {
+      return { clientWidth: 0, scrollWidth: 0 };
+    }
+
+    return {
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    };
+  });
+
+  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
+}
+
+async function seedLongNamedLine(page: import('@playwright/test').Page) {
+  await page.evaluate(() => {
+    const editor = (window as unknown as {
+      __networkEditor: {
+        clearNetwork: () => void;
+        createLine: (name: string, color: string, snapToExisting?: boolean) => void;
+        setActiveLine: (lineId: string) => void;
+        network: {
+          lines: Array<{ id: string }>;
+          addStation: (lng: number, lat: number, name: string) => { id: string };
+          addStationToLine: (lineId: string, stationId: string) => void;
+        };
+      };
+    }).__networkEditor;
+
+    editor.clearNetwork();
+    editor.createLine('Overflow Probe', '#E53935');
+    const lineId = editor.network.lines[0]?.id;
+    if (!lineId) return;
+
+    const names = [
+      'Very Long Station Name That Could Force Layout Issues Alpha',
+      'Very Long Station Name That Could Force Layout Issues Beta',
+      'Very Long Station Name That Could Force Layout Issues Gamma',
+    ];
+    const coords: Array<[number, number]> = [
+      [-0.1, 51.5],
+      [-0.08, 51.52],
+      [-0.06, 51.54],
+    ];
+
+    names.forEach((name, index) => {
+      const station = editor.network.addStation(coords[index][0], coords[index][1], name);
+      editor.network.addStationToLine(lineId, station.id);
+    });
+
+    editor.setActiveLine(lineId);
+  });
+
+  await page.waitForTimeout(150);
+}
+
 async function seedLine(page: import('@playwright/test').Page, lineName = 'Animated Line') {
   await page.locator('#tool-line').click();
   await page.locator('#new-line-name').fill(lineName);
@@ -132,6 +192,24 @@ test('line manager and train picker modal animate in and out', async ({ page }) 
   await page.locator('#line-manager-close').click();
   await waitForMotion(page, '#line-manager', 'exiting');
   await expect(page.locator('#line-manager')).toBeHidden();
+});
+
+test('line manager stays free of horizontal overflow', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await seedLongNamedLine(page);
+
+  await expect(page.locator('#line-manager')).toBeVisible();
+  await page.locator('.lm-stop-handle').first().hover();
+
+  await expectNoHorizontalOverflow(page, '#line-manager');
+  await expectNoHorizontalOverflow(page, '#line-manager-body');
+
+  const documentMetrics = await page.evaluate(() => ({
+    innerWidth: window.innerWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+  }));
+  expect(documentMetrics.scrollWidth).toBeLessThanOrEqual(documentMetrics.innerWidth + 1);
 });
 
 test('journey profile modal animates after choosing rolling stock', async ({ page }) => {

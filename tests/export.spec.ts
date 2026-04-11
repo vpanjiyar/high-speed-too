@@ -131,6 +131,25 @@ async function waitForPreviewDebug(page: import('@playwright/test').Page): Promi
   });
 }
 
+async function waitForMotion(
+  page: import('@playwright/test').Page,
+  selector: string,
+  state: 'entering' | 'exiting',
+) {
+  await page.waitForFunction(
+    ([targetSelector, expectedState]) => {
+      const element = document.querySelector(targetSelector);
+      if (!(element instanceof HTMLElement)) return false;
+
+      const settledState = expectedState === 'entering' ? 'open' : 'closed';
+      const currentState = element.dataset.motionState;
+      return currentState === settledState
+        || (currentState === expectedState && element.getAnimations().length > 0);
+    },
+    [selector, state],
+  );
+}
+
 async function getPreviewDebug(page: import('@playwright/test').Page): Promise<ExportDebug> {
   await waitForPreviewDebug(page);
   return page.evaluate(() => {
@@ -148,6 +167,24 @@ async function waitForPreviewHeader(
     return (frame?.contentWindow as Window & { __EXPORT_DEBUG__?: ExportDebug } | null)?.__EXPORT_DEBUG__?.header === expectedHeader;
   }, header);
   return getPreviewDebug(page);
+}
+
+async function expectNoHorizontalOverflow(
+  page: import('@playwright/test').Page,
+  selector: string,
+) {
+  const metrics = await page.locator(selector).evaluate((element) => {
+    if (!(element instanceof HTMLElement)) {
+      return { clientWidth: 0, scrollWidth: 0 };
+    }
+
+    return {
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    };
+  });
+
+  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
 }
 
 async function sampleCanvasPixel(
@@ -256,6 +293,45 @@ test('export shows line color and stop count', async ({ page }) => {
   await expect(item.locator('.export-line-stops')).toContainText('stops');
 });
 
+test('export modal avoids horizontal overflow and stays within the viewport', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await seedNetwork(page);
+
+  await page.locator('#btn-export').click();
+  await expect(page.locator('#export-modal')).toBeVisible();
+  await page.locator('.export-line-item').first().hover();
+
+  await expectNoHorizontalOverflow(page, '#export-line-list');
+
+  await page.locator('#export-btn-next').click();
+  await waitForPreviewDebug(page);
+
+  await expectNoHorizontalOverflow(page, '.export-modal-box');
+  await expectNoHorizontalOverflow(page, '.export-style-layout');
+
+  const viewportFit = await page.evaluate(() => {
+    const modal = document.querySelector('.export-modal-box');
+    if (!(modal instanceof HTMLElement)) {
+      return null;
+    }
+
+    const rect = modal.getBoundingClientRect();
+    return {
+      top: rect.top,
+      bottom: rect.bottom,
+      innerHeight: window.innerHeight,
+      innerWidth: window.innerWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    };
+  });
+
+  expect(viewportFit).not.toBeNull();
+  expect(viewportFit!.top).toBeGreaterThanOrEqual(0);
+  expect(viewportFit!.bottom).toBeLessThanOrEqual(viewportFit!.innerHeight);
+  expect(viewportFit!.scrollWidth).toBeLessThanOrEqual(viewportFit!.innerWidth + 1);
+});
+
 test('next button requires at least one line selected', async ({ page }) => {
   await page.goto(BASE);
   await waitForMap(page);
@@ -290,10 +366,12 @@ test('clicking next shows style selection step', async ({ page }) => {
 
   await page.locator('#btn-export').click();
   await page.locator('#export-btn-next').click();
+  await waitForMotion(page, '#export-step-lines', 'exiting');
+  await waitForMotion(page, '#export-step-style', 'entering');
 
   // Lines step should be hidden, style step visible
-  await expect(page.locator('#export-step-lines')).toBeHidden();
-  await expect(page.locator('#export-step-style')).toBeVisible();
+  await expect(page.locator('#export-step-lines')).toHaveAttribute('aria-hidden', 'true');
+  await expect(page.locator('#export-step-style')).toHaveAttribute('aria-hidden', 'false');
 });
 
 test('MTA style is selected by default', async ({ page }) => {
@@ -388,11 +466,14 @@ test('back button returns to line selection step', async ({ page }) => {
 
   await page.locator('#btn-export').click();
   await page.locator('#export-btn-next').click();
+  await waitForMotion(page, '#export-step-style', 'entering');
   await expect(page.locator('#export-step-style')).toBeVisible();
 
   await page.locator('#export-btn-back').click();
-  await expect(page.locator('#export-step-lines')).toBeVisible();
-  await expect(page.locator('#export-step-style')).toBeHidden();
+  await waitForMotion(page, '#export-step-style', 'exiting');
+  await waitForMotion(page, '#export-step-lines', 'entering');
+  await expect(page.locator('#export-step-lines')).toHaveAttribute('aria-hidden', 'false');
+  await expect(page.locator('#export-step-style')).toHaveAttribute('aria-hidden', 'true');
 });
 
 test('cancel button closes the export modal', async ({ page }) => {

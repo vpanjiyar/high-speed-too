@@ -1909,6 +1909,7 @@ map.on('load', () => {
   const exportNoLines = document.getElementById('export-no-lines')!;
   const exportShowLegend = document.getElementById('export-show-legend') as HTMLInputElement;
   const exportPreviewFrame = document.getElementById('export-preview-frame') as HTMLIFrameElement;
+  let exportPreviewKey = '';
 
   function getSelectedExportStyle(): ExportStyle {
     const styleRadio = document.querySelector<HTMLInputElement>('input[name="export-style"]:checked');
@@ -1916,10 +1917,24 @@ map.on('load', () => {
   }
 
   function renderExportPreview(): void {
+    const style = getSelectedExportStyle();
+    const lineIds = getSelectedExportLineIds();
+    const showLegend = exportShowLegend.checked;
+
+    if (lineIds.length === 0) {
+      exportPreviewKey = '';
+      exportPreviewFrame.srcdoc = '';
+      return;
+    }
+
+    const previewKey = JSON.stringify({ style, lineIds, showLegend });
+    if (previewKey === exportPreviewKey) return;
+
+    exportPreviewKey = previewKey;
     exportPreviewFrame.srcdoc = buildExportPreviewHTML(editor.network, {
-      style: getSelectedExportStyle(),
-      lineIds: getSelectedExportLineIds(),
-      showLegend: exportShowLegend.checked,
+      style,
+      lineIds,
+      showLegend,
     });
   }
 
@@ -1932,11 +1947,13 @@ map.on('load', () => {
 
     // Populate line list
     exportLineList.innerHTML = '';
+    exportPreviewKey = '';
     const lines = editor.network.lines;
 
     if (lines.length === 0) {
       showAnimatedClass(exportNoLines, 'section');
       hideAnimatedClass(exportBtnNext, 'badge');
+      exportPreviewFrame.srcdoc = '';
     } else {
       hideAnimatedClass(exportNoLines, 'section');
       showAnimatedClass(exportBtnNext, 'badge');
@@ -1962,9 +1979,7 @@ map.on('load', () => {
         stops.textContent = `${line.stationIds.length} stops`;
 
         cb.addEventListener('change', () => {
-          if (!exportStepStyle.classList.contains('hidden')) {
-            renderExportPreview();
-          }
+          renderExportPreview();
         });
 
         item.appendChild(cb);
@@ -1973,6 +1988,8 @@ map.on('load', () => {
         item.appendChild(stops);
         exportLineList.appendChild(item);
       }
+
+      renderExportPreview();
     }
 
     showAnimatedClass(exportModal, 'modal', '.export-modal-box');
@@ -2020,16 +2037,12 @@ map.on('load', () => {
 
   document.querySelectorAll<HTMLInputElement>('input[name="export-style"]').forEach((radio) => {
     radio.addEventListener('change', () => {
-      if (!exportStepStyle.classList.contains('hidden')) {
-        renderExportPreview();
-      }
+      renderExportPreview();
     });
   });
 
   exportShowLegend.addEventListener('change', () => {
-    if (!exportStepStyle.classList.contains('hidden')) {
-      renderExportPreview();
-    }
+    renderExportPreview();
   });
 
   exportBtnCancel.addEventListener('click', closeExportModal);
