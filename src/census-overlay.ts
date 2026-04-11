@@ -2,7 +2,54 @@ import type { Map as MaplibreMap } from 'maplibre-gl';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type CensusMetric = 'off' | 'population' | 'density' | 'working_age';
+export type CensusMetric =
+  | 'off'
+  // Demographics
+  | 'population'
+  | 'density'
+  | 'working_age'
+  | 'elderly'
+  | 'youth'
+  // Transport
+  | 'no_car'
+  | 'train_commuters'
+  | 'bus_commuters'
+  | 'drives_to_work'
+  // Economic
+  | 'economic_activity'
+  | 'renters'
+  // Accessibility
+  | 'disability';
+
+/** Category groupings for the accordion UI */
+export interface MetricCategory {
+  id: string;
+  label: string;
+  metrics: CensusMetric[];
+}
+
+export const METRIC_CATEGORIES: MetricCategory[] = [
+  {
+    id: 'demographics',
+    label: 'Demographics',
+    metrics: ['population', 'density', 'working_age', 'elderly', 'youth'],
+  },
+  {
+    id: 'transport',
+    label: 'Transport',
+    metrics: ['no_car', 'train_commuters', 'bus_commuters', 'drives_to_work'],
+  },
+  {
+    id: 'economic',
+    label: 'Economic',
+    metrics: ['economic_activity', 'renters'],
+  },
+  {
+    id: 'accessibility',
+    label: 'Accessibility',
+    metrics: ['disability'],
+  },
+];
 
 export interface CensusOverlayState {
   metric: CensusMetric;
@@ -22,82 +69,166 @@ const LSOA_OUTLINE  = 'census-lsoa-outline';
 const MSOA_FILL     = 'census-msoa-fill';
 const MSOA_OUTLINE  = 'census-msoa-outline';
 
-// The census fills are inserted immediately above the landuse layers so that
-// boundaries, rail, roads, and labels all render on top.
 const INSERT_BEFORE_LAYER = 'boundary-region';
 
-// Data URLs (served from public/data/ by the Vite dev server)
 const LSOA_GEOJSON_URL = '/data/lsoa_boundaries.geojson';
 const MSOA_GEOJSON_URL = '/data/msoa_boundaries.geojson';
 
-// Zoom threshold: MSOA shown at zoom < 9 (regional), LSOA at zoom >= 9 (city)
 const ZOOM_THRESHOLD = 9;
 
 // ── MapLibre data-driven paint expressions per metric ─────────────────────────
-// These use properties embedded by geography_processor.py:
-//   "pop"      — total usual residents
-//   "work_pop" — working-age population (16–64)
-//   "area_ha"  — polygon area in hectares
-//
-// All values are guarded with ['to-number', ..., 0] so features without
-// census data render transparently rather than breaking the layer.
+// Properties embedded by geography_processor.py via census_processor.py:
+//   "pop"           — total usual residents
+//   "work_pop"      — working-age population (15–64)
+//   "elderly"       — residents aged 65+
+//   "youth"         — residents aged 16–24
+//   "no_car"        — households with no car/van
+//   "households"    — total households
+//   "travel_train"  — commuters using train
+//   "travel_bus"    — commuters using bus/coach
+//   "travel_drive"  — commuters driving a car/van
+//   "travel_total"  — total commuters
+//   "econ_active"   — economically active residents
+//   "econ_total"    — total residents 16+
+//   "renters"       — households renting
+//   "disabled"      — residents with activity-limiting condition
+//   "area_ha"       — polygon area in hectares
+
+/** Safe percentage expression: (numerator / denominator * 100), returns 0 if denom is 0 */
+function pctExpr(numProp: string, denomProp: string) {
+  return [
+    'case',
+    ['>', ['to-number', ['get', denomProp], 0], 0],
+    ['/', ['*', ['to-number', ['get', numProp], 0], 100], ['to-number', ['get', denomProp], 1]],
+    0,
+  ];
+}
 
 const FILL_COLORS: Record<Exclude<CensusMetric, 'off'>, unknown> = {
 
-  // Total population per LSOA — blue ramp
-  // LSOAs are designed to contain ~1,500 residents, so the scale tops at ~4,000
+  // ── Demographics ───────────────────────────────────────────────────────────
+
+  // Total population — blue ramp
   population: [
     'interpolate', ['linear'],
     ['to-number', ['get', 'pop'], 0],
-    0,    'rgba(247,251,255,0.0)',
-    500,  '#c6dbef',
-    1500, '#6baed6',
-    2500, '#2171b5',
-    4000, '#08306b',
+    0, 'rgba(247,251,255,0.0)',  500, '#c6dbef',  1500, '#6baed6',
+    2500, '#2171b5',  4000, '#08306b',
   ],
 
   // Population density (residents per hectare) — orange-brown ramp
-  // Computed from "pop" / max("area_ha", 0.01) to avoid divide-by-zero
   density: [
     'interpolate', ['linear'],
     ['/', ['to-number', ['get', 'pop'], 0],
           ['max', ['to-number', ['get', 'area_ha'], 1], 0.01]],
-    0,    'rgba(255,247,188,0.0)',
-    5,    '#fee391',
-    20,   '#fe9929',
-    60,   '#cc4c02',
-    150,  '#662506',
+    0, 'rgba(255,247,188,0.0)',  5, '#fee391',  20, '#fe9929',
+    60, '#cc4c02',  150, '#662506',
   ],
 
-  // Working-age percentage (work_pop / pop * 100) — green ramp
-  // Falls back to 0 when "pop" is absent or zero
+  // Working-age % (work_pop / pop * 100) — green ramp
   working_age: [
     'interpolate', ['linear'],
-    ['case',
-      ['>', ['to-number', ['get', 'pop'], 0], 0],
-      ['/',
-        ['*', ['to-number', ['get', 'work_pop'], 0], 100],
-        ['to-number', ['get', 'pop'], 1],
-      ],
-      0,
-    ],
-    0,  'rgba(255,245,235,0.0)',
-    30, '#c7e9b4',
-    45, '#41b6c4',
-    55, '#1d91c0',
-    70, '#0c2c84',
+    pctExpr('work_pop', 'pop'),
+    0, 'rgba(255,245,235,0.0)',  30, '#c7e9b4',  45, '#41b6c4',
+    55, '#1d91c0',  70, '#0c2c84',
+  ],
+
+  // Elderly % (65+ / pop * 100) — purple ramp
+  elderly: [
+    'interpolate', ['linear'],
+    pctExpr('elderly', 'pop'),
+    0, 'rgba(252,251,253,0.0)',  10, '#cbc9e2',  20, '#9e9ac8',
+    30, '#756bb1',  50, '#54278f',
+  ],
+
+  // Youth % (16–24 / pop * 100) — teal ramp
+  youth: [
+    'interpolate', ['linear'],
+    pctExpr('youth', 'pop'),
+    0, 'rgba(247,252,253,0.0)',  5, '#ccece6',  10, '#66c2a4',
+    20, '#238b45',  40, '#00441b',
+  ],
+
+  // ── Transport ──────────────────────────────────────────────────────────────
+
+  // No-car households % — red ramp (high = more transit-dependent)
+  no_car: [
+    'interpolate', ['linear'],
+    pctExpr('no_car', 'households'),
+    0, 'rgba(255,245,240,0.0)',  15, '#fcbba1',  30, '#fb6a4a',
+    50, '#cb181d',  80, '#67000d',
+  ],
+
+  // Train commuters % — deep blue ramp
+  train_commuters: [
+    'interpolate', ['linear'],
+    pctExpr('travel_train', 'travel_total'),
+    0, 'rgba(247,251,255,0.0)',  2, '#c6dbef',  5, '#6baed6',
+    15, '#2171b5',  40, '#08306b',
+  ],
+
+  // Bus commuters % — amber ramp
+  bus_commuters: [
+    'interpolate', ['linear'],
+    pctExpr('travel_bus', 'travel_total'),
+    0, 'rgba(255,255,229,0.0)',  5, '#fed976',  10, '#feb24c',
+    20, '#f03b20',  40, '#bd0026',
+  ],
+
+  // Drives to work % — grey-steel ramp (high = potential to convert)
+  drives_to_work: [
+    'interpolate', ['linear'],
+    pctExpr('travel_drive', 'travel_total'),
+    0, 'rgba(247,247,247,0.0)',  30, '#d9d9d9',  50, '#969696',
+    70, '#525252',  90, '#252525',
+  ],
+
+  // ── Economic ───────────────────────────────────────────────────────────────
+
+  // Economic activity % — warm green ramp
+  economic_activity: [
+    'interpolate', ['linear'],
+    pctExpr('econ_active', 'econ_total'),
+    0, 'rgba(247,252,245,0.0)',  40, '#c7e9c0',  55, '#74c476',
+    70, '#238b45',  90, '#00441b',
+  ],
+
+  // Renters % — pink-magenta ramp
+  renters: [
+    'interpolate', ['linear'],
+    pctExpr('renters', 'households'),
+    0, 'rgba(253,224,239,0.0)',  20, '#fcc5c0',  40, '#f768a1',
+    60, '#c51b8a',  80, '#7a0177',
+  ],
+
+  // ── Accessibility ──────────────────────────────────────────────────────────
+
+  // Disability % (activity-limited / pop * 100) — brown ramp
+  disability: [
+    'interpolate', ['linear'],
+    pctExpr('disabled', 'pop'),
+    0, 'rgba(255,247,243,0.0)',  10, '#fdd0a2',  20, '#f16913',
+    35, '#d94801',  50, '#7f2704',
   ],
 };
 
 export const METRIC_LABELS: Record<CensusMetric, string> = {
-  off:         'Off',
-  population:  'Population',
-  density:     'Density (pop/ha)',
-  working_age: 'Working Age %',
+  off:               'Off',
+  population:        'Population',
+  density:           'Density (pop/ha)',
+  working_age:       'Working Age %',
+  elderly:           'Elderly (65+) %',
+  youth:             'Youth (16–24) %',
+  no_car:            'No Car/Van %',
+  train_commuters:   'Train Commuters %',
+  bus_commuters:     'Bus Commuters %',
+  drives_to_work:    'Drives to Work %',
+  economic_activity: 'Economically Active %',
+  renters:           'Renters %',
+  disability:        'Disability %',
 };
 
 export interface LegendConfig {
-  /** CSS linear-gradient string */
   gradient: string;
   minLabel: string;
   maxLabel: string;
@@ -105,19 +236,52 @@ export interface LegendConfig {
 
 export const LEGEND_CONFIGS: Record<Exclude<CensusMetric, 'off'>, LegendConfig> = {
   population: {
-    gradient:  'linear-gradient(to right, #c6dbef, #6baed6, #2171b5, #08306b)',
-    minLabel: '0',
-    maxLabel: '4,000+ residents',
+    gradient: 'linear-gradient(to right, #c6dbef, #6baed6, #2171b5, #08306b)',
+    minLabel: '0', maxLabel: '4,000+ residents',
   },
   density: {
-    gradient:  'linear-gradient(to right, #fee391, #fe9929, #cc4c02, #662506)',
-    minLabel: '0 /ha',
-    maxLabel: '150+ /ha',
+    gradient: 'linear-gradient(to right, #fee391, #fe9929, #cc4c02, #662506)',
+    minLabel: '0 /ha', maxLabel: '150+ /ha',
   },
   working_age: {
-    gradient:  'linear-gradient(to right, #c7e9b4, #41b6c4, #1d91c0, #0c2c84)',
-    minLabel: '30%',
-    maxLabel: '70%',
+    gradient: 'linear-gradient(to right, #c7e9b4, #41b6c4, #1d91c0, #0c2c84)',
+    minLabel: '30%', maxLabel: '70%',
+  },
+  elderly: {
+    gradient: 'linear-gradient(to right, #cbc9e2, #9e9ac8, #756bb1, #54278f)',
+    minLabel: '10%', maxLabel: '50%',
+  },
+  youth: {
+    gradient: 'linear-gradient(to right, #ccece6, #66c2a4, #238b45, #00441b)',
+    minLabel: '5%', maxLabel: '40%',
+  },
+  no_car: {
+    gradient: 'linear-gradient(to right, #fcbba1, #fb6a4a, #cb181d, #67000d)',
+    minLabel: '15%', maxLabel: '80%',
+  },
+  train_commuters: {
+    gradient: 'linear-gradient(to right, #c6dbef, #6baed6, #2171b5, #08306b)',
+    minLabel: '2%', maxLabel: '40%',
+  },
+  bus_commuters: {
+    gradient: 'linear-gradient(to right, #fed976, #feb24c, #f03b20, #bd0026)',
+    minLabel: '5%', maxLabel: '40%',
+  },
+  drives_to_work: {
+    gradient: 'linear-gradient(to right, #d9d9d9, #969696, #525252, #252525)',
+    minLabel: '30%', maxLabel: '90%',
+  },
+  economic_activity: {
+    gradient: 'linear-gradient(to right, #c7e9c0, #74c476, #238b45, #00441b)',
+    minLabel: '40%', maxLabel: '90%',
+  },
+  renters: {
+    gradient: 'linear-gradient(to right, #fcc5c0, #f768a1, #c51b8a, #7a0177)',
+    minLabel: '20%', maxLabel: '80%',
+  },
+  disability: {
+    gradient: 'linear-gradient(to right, #fdd0a2, #f16913, #d94801, #7f2704)',
+    minLabel: '10%', maxLabel: '50%',
   },
 };
 

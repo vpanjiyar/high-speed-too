@@ -12,16 +12,93 @@ export interface CatchmentStats {
   workingAge: number;
   /** Working-age as a % of total (0–100). */
   workingAgePct: number;
+  /** Estimated residents aged 16-24. */
+  youth: number;
+  /** Youth share of total population (0-100). */
+  youthPct: number;
+  /** Estimated residents aged 65+. */
+  elderly: number;
+  /** Elderly share of total population (0-100). */
+  elderlyPct: number;
   /** Population density of the catchment (pop / ha). */
   densityPerHa: number;
+  /** Estimated households within catchment. */
+  households: number;
+  /** Households with no car or van. */
+  noCarHouseholds: number;
+  /** No-car share of households (0-100). */
+  noCarPct: number;
+  /** Commuters using rail. */
+  trainCommuters: number;
+  /** Rail commute share of all commuters (0-100). */
+  trainCommutersPct: number;
+  /** Commuters using bus or coach. */
+  busCommuters: number;
+  /** Bus commute share of all commuters (0-100). */
+  busCommutersPct: number;
+  /** Commuters driving a car or van. */
+  driveCommuters: number;
+  /** Drive share of all commuters (0-100). */
+  driveCommutersPct: number;
+  /** Total commuters in the catchment. */
+  commutersTotal: number;
+  /** Economically active residents. */
+  economicallyActive: number;
+  /** Economically active share of residents aged 16+ (0-100). */
+  economicallyActivePct: number;
+  /** Households renting. */
+  renters: number;
+  /** Renting share of households (0-100). */
+  rentersPct: number;
+  /** Residents reporting activity limitation. */
+  disabled: number;
+  /** Disability share of total population (0-100). */
+  disabledPct: number;
   /** Number of LSOAs contributing to the catchment. */
   lsoaCount: number;
 }
 
 interface LsoaFeature {
   geometry: { type: string; coordinates: unknown };
-  properties: { code: string; name: string; area_ha: number; pop: number; work_pop: number };
+  properties: {
+    code: string;
+    name: string;
+    area_ha: number;
+    pop: number;
+    work_pop: number;
+    youth?: number;
+    elderly?: number;
+    households?: number;
+    no_car?: number;
+    travel_train?: number;
+    travel_bus?: number;
+    travel_drive?: number;
+    travel_total?: number;
+    econ_active?: number;
+    econ_total?: number;
+    renters?: number;
+    disabled?: number;
+  };
 }
+
+type CatchmentAccumulator = {
+  population: number;
+  workingAge: number;
+  youth: number;
+  elderly: number;
+  totalAreaHa: number;
+  households: number;
+  noCarHouseholds: number;
+  trainCommuters: number;
+  busCommuters: number;
+  driveCommuters: number;
+  commutersTotal: number;
+  economicallyActive: number;
+  economicallyActiveTotal: number;
+  renters: number;
+  disabled: number;
+  lsoaCount: number;
+};
 
 // Singleton cache
 let _geojsonPromise: Promise<LsoaFeature[]> | null = null;
@@ -81,6 +158,92 @@ function featureCentroid(feature: LsoaFeature): [number, number] {
   return [0, 0];
 }
 
+function safePct(numerator: number, denominator: number): number {
+  return denominator > 0 ? Math.round(((numerator / denominator) * 100) * 10) / 10 : 0;
+}
+
+function emptyCatchmentStats(): CatchmentStats {
+  return {
+    population: 0,
+    workingAge: 0,
+    workingAgePct: 0,
+    youth: 0,
+    youthPct: 0,
+    elderly: 0,
+    elderlyPct: 0,
+    densityPerHa: 0,
+    households: 0,
+    noCarHouseholds: 0,
+    noCarPct: 0,
+    trainCommuters: 0,
+    trainCommutersPct: 0,
+    busCommuters: 0,
+    busCommutersPct: 0,
+    driveCommuters: 0,
+    driveCommutersPct: 0,
+    commutersTotal: 0,
+    economicallyActive: 0,
+    economicallyActivePct: 0,
+    renters: 0,
+    rentersPct: 0,
+    disabled: 0,
+    disabledPct: 0,
+    lsoaCount: 0,
+  };
+}
+
+function finalizeCatchmentStats(acc: CatchmentAccumulator): CatchmentStats {
+  const densityPerHa = acc.totalAreaHa > 0 ? acc.population / acc.totalAreaHa : 0;
+
+  return {
+    population: acc.population,
+    workingAge: acc.workingAge,
+    workingAgePct: safePct(acc.workingAge, acc.population),
+    youth: acc.youth,
+    youthPct: safePct(acc.youth, acc.population),
+    elderly: acc.elderly,
+    elderlyPct: safePct(acc.elderly, acc.population),
+    densityPerHa: Math.round(densityPerHa * 10) / 10,
+    households: acc.households,
+    noCarHouseholds: acc.noCarHouseholds,
+    noCarPct: safePct(acc.noCarHouseholds, acc.households),
+    trainCommuters: acc.trainCommuters,
+    trainCommutersPct: safePct(acc.trainCommuters, acc.commutersTotal),
+    busCommuters: acc.busCommuters,
+    busCommutersPct: safePct(acc.busCommuters, acc.commutersTotal),
+    driveCommuters: acc.driveCommuters,
+    driveCommutersPct: safePct(acc.driveCommuters, acc.commutersTotal),
+    commutersTotal: acc.commutersTotal,
+    economicallyActive: acc.economicallyActive,
+    economicallyActivePct: safePct(acc.economicallyActive, acc.economicallyActiveTotal),
+    renters: acc.renters,
+    rentersPct: safePct(acc.renters, acc.households),
+    disabled: acc.disabled,
+    disabledPct: safePct(acc.disabled, acc.population),
+    lsoaCount: acc.lsoaCount,
+  };
+}
+
+function accumulateFeature(acc: CatchmentAccumulator, feature: LsoaFeature): void {
+  const p = feature.properties;
+  acc.population += p.pop ?? 0;
+  acc.workingAge += p.work_pop ?? 0;
+  acc.youth += p.youth ?? 0;
+  acc.elderly += p.elderly ?? 0;
+  acc.totalAreaHa += p.area_ha ?? 0;
+  acc.households += p.households ?? 0;
+  acc.noCarHouseholds += p.no_car ?? 0;
+  acc.trainCommuters += p.travel_train ?? 0;
+  acc.busCommuters += p.travel_bus ?? 0;
+  acc.driveCommuters += p.travel_drive ?? 0;
+  acc.commutersTotal += p.travel_total ?? 0;
+  acc.economicallyActive += p.econ_active ?? 0;
+  acc.economicallyActiveTotal += p.econ_total ?? 0;
+  acc.renters += p.renters ?? 0;
+  acc.disabled += p.disabled ?? 0;
+  acc.lsoaCount += 1;
+}
+
 /**
  * Pre-warm the LSOA cache. Call early so data is ready when a station is
  * selected. Safe to call multiple times.
@@ -99,33 +262,35 @@ export async function fetchCatchmentStats(
 ): Promise<CatchmentStats> {
   const features = await loadLsoa();
 
-  let totalPop = 0;
-  let totalWorkPop = 0;
-  let totalAreaHa = 0;
-  let count = 0;
+  const acc: CatchmentAccumulator = {
+    population: 0,
+    workingAge: 0,
+    youth: 0,
+    elderly: 0,
+    totalAreaHa: 0,
+    households: 0,
+    noCarHouseholds: 0,
+    trainCommuters: 0,
+    busCommuters: 0,
+    driveCommuters: 0,
+    commutersTotal: 0,
+    economicallyActive: 0,
+    economicallyActiveTotal: 0,
+    renters: 0,
+    disabled: 0,
+    lsoaCount: 0,
+  };
 
   for (const f of features) {
     const p = f.properties;
     if (!p || typeof p.pop !== 'number') continue;
     const [cLng, cLat] = featureCentroid(f);
     if (haversineKm(lng, lat, cLng, cLat) <= CATCHMENT_KM) {
-      totalPop     += p.pop;
-      totalWorkPop += p.work_pop ?? 0;
-      totalAreaHa  += p.area_ha ?? 0;
-      count++;
+      accumulateFeature(acc, f);
     }
   }
 
-  const workingAgePct = totalPop > 0 ? (totalWorkPop / totalPop) * 100 : 0;
-  const densityPerHa  = totalAreaHa > 0 ? totalPop / totalAreaHa : 0;
-
-  return {
-    population:    totalPop,
-    workingAge:    totalWorkPop,
-    workingAgePct: Math.round(workingAgePct * 10) / 10,
-    densityPerHa:  Math.round(densityPerHa * 10) / 10,
-    lsoaCount:     count,
-  };
+  return finalizeCatchmentStats(acc);
 }
 
 /**
@@ -136,15 +301,29 @@ export async function fetchLineCatchmentStats(
   stations: Array<{ lng: number; lat: number }>,
 ): Promise<CatchmentStats> {
   if (stations.length === 0) {
-    return { population: 0, workingAge: 0, workingAgePct: 0, densityPerHa: 0, lsoaCount: 0 };
+    return emptyCatchmentStats();
   }
 
   const features = await loadLsoa();
   const seen = new Set<string>();
-  let totalPop = 0;
-  let totalWorkPop = 0;
-  let totalAreaHa = 0;
-  let count = 0;
+  const acc: CatchmentAccumulator = {
+    population: 0,
+    workingAge: 0,
+    youth: 0,
+    elderly: 0,
+    totalAreaHa: 0,
+    households: 0,
+    noCarHouseholds: 0,
+    trainCommuters: 0,
+    busCommuters: 0,
+    driveCommuters: 0,
+    commutersTotal: 0,
+    economicallyActive: 0,
+    economicallyActiveTotal: 0,
+    renters: 0,
+    disabled: 0,
+    lsoaCount: 0,
+  };
 
   for (const f of features) {
     const p = f.properties;
@@ -158,21 +337,9 @@ export async function fetchLineCatchmentStats(
 
     if (inCatchment) {
       seen.add(p.code);
-      totalPop     += p.pop;
-      totalWorkPop += p.work_pop ?? 0;
-      totalAreaHa  += p.area_ha ?? 0;
-      count++;
+      accumulateFeature(acc, f);
     }
   }
 
-  const workingAgePct = totalPop > 0 ? (totalWorkPop / totalPop) * 100 : 0;
-  const densityPerHa  = totalAreaHa > 0 ? totalPop / totalAreaHa : 0;
-
-  return {
-    population:    totalPop,
-    workingAge:    totalWorkPop,
-    workingAgePct: Math.round(workingAgePct * 10) / 10,
-    densityPerHa:  Math.round(densityPerHa * 10) / 10,
-    lsoaCount:     count,
-  };
+  return finalizeCatchmentStats(acc);
 }

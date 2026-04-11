@@ -1,11 +1,19 @@
 Things that might be good:
-DONE: Reorder stations
-Make panels adjustable
-Export Maps (Select lines > Export realistic of LU Style)
-More census data
-Line utilisation and simulation etc
-Snap to existing lines
+
+Improve map exports
 Other views ? idk which ones though
 AI.md or something
 Big refactor ?
-Acceleration Graph
+Custom theme for brand
+Curves in track affect speed
+Improve snap to existing lines
+Improve cursor choice
+
+DONE: Icon !
+DONE: Animations
+DONE: Snap to existing lines
+DONE: Line utilisation
+DONE: Make panels adjustable
+DONE: More census data
+DONE: Acceleration Graph
+DONE: Reorder stations

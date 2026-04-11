@@ -4,7 +4,9 @@
 import type { Map as MaplibreMap, MapMouseEvent } from 'maplibre-gl';
 import { Network } from './network';
 import type { Station, NetworkData } from './network';
+import type { LinePathCoordinate } from './network';
 import { NetworkRenderer } from './network-renderer';
+import { ExistingTrackRouter } from './track-router';
 
 export type EditorMode = 'select' | 'station' | 'line';
 
@@ -14,6 +16,12 @@ export interface EditorState {
   activeLineId: string | null;
   /** The station currently selected (in select mode). */
   selectedStationId: string | null;
+  /** Whether the current line endpoint can snap onto existing track. */
+  snapToExistingAvailable: boolean;
+  /** Human-readable availability message for the snap toggle. */
+  snapToExistingReason: string | null;
+  /** True while the editor is checking or resolving a snapped route. */
+  snapToExistingBusy: boolean;
 }
 
 export type EditorStateCallback = (state: EditorState) => void;
@@ -42,6 +50,11 @@ export class NetworkEditor {
   private activeLineId: string | null = null;
   private selectedStationId: string | null = null;
   private onStateChange?: EditorStateCallback;
+  private readonly trackRouter = new ExistingTrackRouter();
+  private snapToExistingAvailable = true;
+  private snapToExistingReason: string | null = null;
+  private snapToExistingBusy = false;
+  private snapAvailabilityToken = 0;
 
   constructor(map: MaplibreMap, onStateChange?: EditorStateCallback) {
     this.map = map;
@@ -52,6 +65,7 @@ export class NetworkEditor {
     this.onStateChange = onStateChange;
     this.network.onChange(() => {
       this.renderer.update();
+      void this._refreshSnapAvailability();
       this._emit();
     });
 
@@ -85,6 +99,7 @@ export class NetworkEditor {
 
   /** Trigger an initial UI sync. Call once after construction is complete. */
   syncUI(): void {
+    void this._refreshSnapAvailability();
     this._emit();
   }
 
@@ -93,6 +108,9 @@ export class NetworkEditor {
       mode: this.mode,
       activeLineId: this.activeLineId,
       selectedStationId: this.selectedStationId,
+      snapToExistingAvailable: this.snapToExistingAvailable,
+      snapToExistingReason: this.snapToExistingReason,
+      snapToExistingBusy: this.snapToExistingBusy,
     };
   }
 
@@ -108,16 +126,18 @@ export class NetworkEditor {
       this.activeLineId = null;
     }
     this._updateCursor();
+    void this._refreshSnapAvailability();
     this._emit();
   }
 
   // ── Line management ────────────────────────────────────────────────────────
 
-  createLine(name: string, color: string): void {
-    const line = this.network.addLine(name, color);
+  createLine(name: string, color: string, snapToExisting = false): void {
+    const line = this.network.addLine(name, color, snapToExisting);
     this.activeLineId = line.id;
     this.mode = 'line';
     this._updateCursor();
+    void this._refreshSnapAvailability();
     this._emit();
   }
 
@@ -125,7 +145,14 @@ export class NetworkEditor {
     this.activeLineId = id;
     if (id) this.mode = 'line';
     this._updateCursor();
+    void this._refreshSnapAvailability();
     this._emit();
+  }
+
+  setActiveLineSnapToExisting(enabled: boolean): void {
+    if (!this.activeLineId) return;
+    this.network.setLineSnapToExisting(this.activeLineId, enabled);
+    void this._refreshSnapAvailability();
   }
 
   deleteLine(id: string): void {
@@ -135,6 +162,7 @@ export class NetworkEditor {
       this.mode = 'select';
     }
     this._updateCursor();
+    void this._refreshSnapAvailability();
     this._emit();
   }
 
@@ -180,6 +208,7 @@ export class NetworkEditor {
     this.renderer.setSelectedStation(null);
     this.mode = 'select';
     this._updateCursor();
+    void this._refreshSnapAvailability();
     this._emit();
   }
 
@@ -194,6 +223,7 @@ export class NetworkEditor {
     this.renderer.setSelectedStation(null);
     this.mode = 'select';
     this._updateCursor();
+    void this._refreshSnapAvailability();
     this._emit();
   }
 
@@ -205,12 +235,14 @@ export class NetworkEditor {
   undo(): void {
     this.network.undo();
     this._sanitizeEditorState();
+    void this._refreshSnapAvailability();
     this._emit();
   }
 
   redo(): void {
     this.network.redo();
     this._sanitizeEditorState();
+    void this._refreshSnapAvailability();
     this._emit();
   }
 
@@ -227,6 +259,55 @@ export class NetworkEditor {
         this._updateCursor();
       }
     }
+  }
+
+  private _setSnapAvailability(available: boolean, busy: boolean, reason: string | null): void {
+    this.snapToExistingAvailable = available;
+    this.snapToExistingBusy = busy;
+    this.snapToExistingReason = reason;
+  }
+
+  private async _refreshSnapAvailability(): Promise<void> {
+    const token = ++this.snapAvailabilityToken;
+    const lineId = this.activeLineId;
+
+    if (this.mode !== 'line' || !lineId) {
+      this._setSnapAvailability(true, false, null);
+      this._emit();
+      return;
+    }
+
+    const line = this.network.getLine(lineId);
+    if (!line || line.stationIds.length === 0) {
+      this._setSnapAvailability(true, false, null);
+      this._emit();
+      return;
+    }
+
+    const lastStationId = line.stationIds[line.stationIds.length - 1];
+    const lastStation = lastStationId ? this.network.getStation(lastStationId) : undefined;
+    if (!lastStation) {
+      this._setSnapAvailability(false, false, 'No existing route is available from the current endpoint.');
+      this._emit();
+      return;
+    }
+
+    this._setSnapAvailability(this.snapToExistingAvailable, true, 'Checking nearby tracks…');
+    this._emit();
+
+    const canSnap = await this.trackRouter.canSnapFrom(this.network, [lastStation.lng, lastStation.lat]);
+    if (token !== this.snapAvailabilityToken) return;
+
+    this._setSnapAvailability(
+      canSnap,
+      false,
+      canSnap ? null : 'No existing route is available from the current endpoint.',
+    );
+    if (!canSnap && line.snapToExisting) {
+      this.network.setLineSnapToExisting(line.id, false);
+      return;
+    }
+    this._emit();
   }
 
   // ── Private ────────────────────────────────────────────────────────────────
@@ -279,7 +360,7 @@ export class NetworkEditor {
     return this.network.addStation(hit.lng, hit.lat, hit.name, hit.atco || undefined);
   }
 
-  private _onMapClick = (e: MapMouseEvent): void => {
+  private _onMapClick = async (e: MapMouseEvent): Promise<void> => {
     const networkStationId = this.renderer.hitTestStation([e.point.x, e.point.y]);
     const naptanHit = this._hitTestNaptan([e.point.x, e.point.y]);
 
@@ -320,17 +401,56 @@ export class NetworkEditor {
 
       case 'line':
         if (!this.activeLineId) break;
-        if (networkStationId) {
-          // Existing user station — add directly to line
-          this.network.addStationToLine(this.activeLineId, networkStationId);
-        } else if (naptanHit) {
-          // Real-world station — import/reuse and add to line
-          const station = this._getOrImportStation(naptanHit);
-          this.network.addStationToLine(this.activeLineId, station.id);
-        } else {
-          // Empty map — place a new blank station and add to line
-          const station = this.network.addStation(e.lngLat.lng, e.lngLat.lat);
-          this.network.addStationToLine(this.activeLineId, station.id);
+        {
+          const activeLine = this.network.getLine(this.activeLineId);
+          if (!activeLine) break;
+
+          let station = networkStationId ? this.network.getStation(networkStationId) ?? null : null;
+          const targetCoordinates: LinePathCoordinate = station
+            ? [station.lng, station.lat]
+            : naptanHit
+              ? [naptanHit.lng, naptanHit.lat]
+              : [e.lngLat.lng, e.lngLat.lat];
+
+          const ensureTargetStation = (): Station => {
+            if (station) return station;
+            if (naptanHit) {
+              station = this._getOrImportStation(naptanHit);
+            } else {
+              station = this.network.addStation(targetCoordinates[0], targetCoordinates[1]);
+            }
+            return station;
+          };
+
+          const shouldSnap = activeLine.snapToExisting === true && activeLine.stationIds.length > 0;
+          if (shouldSnap) {
+            const fromStationId = activeLine.stationIds[activeLine.stationIds.length - 1];
+            const fromStation = fromStationId ? this.network.getStation(fromStationId) : undefined;
+            if (fromStation) {
+              this._setSnapAvailability(this.snapToExistingAvailable, true, 'Finding route along existing tracks…');
+              this._emit();
+
+              const route = await this.trackRouter.findRoute(
+                this.network,
+                [fromStation.lng, fromStation.lat],
+                targetCoordinates,
+              );
+              this._setSnapAvailability(this.snapToExistingAvailable, false, this.snapToExistingReason);
+              if (!route) {
+                alert('No route could be found along existing tracks for that stop.');
+                this._emit();
+                return;
+              }
+
+              const snappedStation = ensureTargetStation();
+              this.network.addStationToLine(this.activeLineId, snappedStation.id, route);
+              this._emit();
+              return;
+            }
+          }
+
+          const targetStation = ensureTargetStation();
+          this.network.addStationToLine(this.activeLineId, targetStation.id);
         }
         this._emit();
         break;

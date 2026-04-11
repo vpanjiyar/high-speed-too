@@ -31,6 +31,38 @@ async function getLineCount(page: import('@playwright/test').Page): Promise<numb
   );
 }
 
+async function mockRailNetwork(
+  page: import('@playwright/test').Page,
+  lineStrings: Array<Array<[number, number]>>,
+) {
+  await page.evaluate((mockedLineStrings) => {
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string'
+        ? input
+        : input instanceof Request
+          ? input.url
+          : input.toString();
+
+      if (url.includes('/data/rail_lines.geojson')) {
+        return new Response(JSON.stringify({
+          type: 'FeatureCollection',
+          features: mockedLineStrings.map((coordinates) => ({
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates },
+            properties: {},
+          })),
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      return originalFetch(input, init);
+    };
+  }, lineStrings);
+}
+
 /**
  * Monkey-patch MapLibre's queryRenderedFeatures on the map instance so that
  * a fake NaPTAN station appears at ANY queried bbox. This lets us test the
@@ -332,6 +364,245 @@ test('line list shows correct station count after drawing', async ({ page }) => 
   await page.waitForTimeout(300);
 
   await expect(page.locator('.line-item-stations')).toHaveText('3 stn');
+});
+
+test('snap to existing disables itself when the current endpoint has no reusable route', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await mockRailNetwork(page, []);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-snap').check();
+  await page.locator('#new-line-name').fill('Detached');
+  await page.locator('#new-line-add').click();
+
+  const canvas = await page.locator('#map canvas').boundingBox();
+  expect(canvas).not.toBeNull();
+  await page.mouse.click(canvas!.x + canvas!.width / 2, canvas!.y + canvas!.height / 2);
+
+  await expect(page.locator('#new-line-snap')).toBeDisabled();
+  await expect(page.locator('#new-line-snap')).not.toBeChecked();
+  await expect(page.locator('#new-line-snap-help')).toContainText('No existing route is available');
+});
+
+test('snap to existing reuses mocked National Rail geometry instead of drawing a straight segment', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  const canvas = await page.locator('#map canvas').boundingBox();
+  expect(canvas).not.toBeNull();
+
+  const routePoints = await page.evaluate(({ width, height }) => {
+    const map = (window as unknown as { __map: { unproject: (point: [number, number]) => { lng: number; lat: number } } }).__map;
+    const relPoints: Array<[number, number]> = [
+      [width / 2 - 90, height / 2],
+      [width / 2, height / 2 - 35],
+      [width / 2 + 90, height / 2],
+    ];
+    return relPoints.map(([x, y]) => {
+      const lngLat = map.unproject([x, y]);
+      return [lngLat.lng, lngLat.lat] as [number, number];
+    });
+  }, { width: canvas!.width, height: canvas!.height });
+
+  await mockRailNetwork(page, [routePoints]);
+
+  const snappedLine = await page.evaluate(async (points) => {
+    const editor = (window as unknown as {
+      __networkEditor: {
+        network: {
+          addLine: (name: string, color: string, snapToExisting?: boolean) => { id: string; segmentPaths?: Array<Array<[number, number]> | null> };
+          addStation: (lng: number, lat: number, name?: string) => { id: string };
+          addStationToLine: (lineId: string, stationId: string, segmentPath?: Array<[number, number]>) => void;
+          getLine: (lineId: string) => { segmentPaths?: Array<Array<[number, number]> | null> } | undefined;
+        };
+        trackRouter: {
+          findRoute: (
+            network: unknown,
+            start: [number, number],
+            end: [number, number],
+          ) => Promise<Array<[number, number]> | null>;
+        };
+      };
+    }).__networkEditor;
+
+    const [startPoint, , endPoint] = points;
+    const line = editor.network.addLine('National Rail Snap', '#1d4ed8', true);
+    const startStation = editor.network.addStation(startPoint[0], startPoint[1], 'Start');
+    editor.network.addStationToLine(line.id, startStation.id);
+
+    const route = await editor.trackRouter.findRoute(editor.network, startPoint, endPoint);
+    if (!route) return null;
+
+    const endStation = editor.network.addStation(endPoint[0], endPoint[1], 'End');
+    editor.network.addStationToLine(line.id, endStation.id, route);
+    return editor.network.getLine(line.id)?.segmentPaths?.[0] ?? null;
+  }, routePoints);
+
+  expect(snappedLine).not.toBeNull();
+  expect(snappedLine).toHaveLength(3);
+  expect(snappedLine![1]![0]).toBeCloseTo(routePoints[1]![0], 6);
+  expect(snappedLine![1]![1]).toBeCloseTo(routePoints[1]![1], 6);
+});
+
+test('snap to existing can reuse a route from an earlier user-drawn line', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await mockRailNetwork(page, []);
+
+  const canvas = await page.locator('#map canvas').boundingBox();
+  expect(canvas).not.toBeNull();
+
+  const routePoints = await page.evaluate(({ width, height }) => {
+    const map = (window as unknown as { __map: { unproject: (point: [number, number]) => { lng: number; lat: number } } }).__map;
+    const relPoints: Array<[number, number]> = [
+      [width / 2 - 110, height / 2],
+      [width / 2, height / 2 - 35],
+      [width / 2 + 110, height / 2],
+    ];
+    return relPoints.map(([x, y]) => {
+      const lngLat = map.unproject([x, y]);
+      return [lngLat.lng, lngLat.lat] as [number, number];
+    });
+  }, { width: canvas!.width, height: canvas!.height });
+
+  const reusedLine = await page.evaluate(async (points) => {
+    const editor = (window as unknown as {
+      __networkEditor: {
+        network: {
+          addLine: (name: string, color: string, snapToExisting?: boolean) => { id: string };
+          addStation: (lng: number, lat: number, name?: string) => { id: string };
+          addStationToLine: (lineId: string, stationId: string, segmentPath?: Array<[number, number]>) => void;
+          getLine: (lineId: string) => { segmentPaths?: Array<Array<[number, number]> | null> } | undefined;
+        };
+        trackRouter: {
+          findRoute: (
+            network: unknown,
+            start: [number, number],
+            end: [number, number],
+          ) => Promise<Array<[number, number]> | null>;
+        };
+      };
+    }).__networkEditor;
+
+    const [startPoint, middlePoint, endPoint] = points;
+    const baseLine = editor.network.addLine('Base', '#e11d48');
+    const startStation = editor.network.addStation(startPoint[0], startPoint[1], 'Base Start');
+    const middleStation = editor.network.addStation(middlePoint[0], middlePoint[1], 'Base Mid');
+    const endStation = editor.network.addStation(endPoint[0], endPoint[1], 'Base End');
+
+    editor.network.addStationToLine(baseLine.id, startStation.id);
+    editor.network.addStationToLine(baseLine.id, middleStation.id);
+    editor.network.addStationToLine(baseLine.id, endStation.id);
+
+    const reuseLine = editor.network.addLine('Reuse', '#2563eb', true);
+    editor.network.addStationToLine(reuseLine.id, startStation.id);
+
+    const route = await editor.trackRouter.findRoute(editor.network, startPoint, endPoint);
+    if (!route) return null;
+
+    editor.network.addStationToLine(reuseLine.id, endStation.id, route);
+    return editor.network.getLine(reuseLine.id)?.segmentPaths?.[0] ?? null;
+  }, routePoints);
+
+  expect(reusedLine).not.toBeNull();
+  expect(reusedLine).toEqual(routePoints);
+});
+
+test('shared snapped segments render as a single multi-colour corridor', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await mockRailNetwork(page, []);
+
+  const canvas = await page.locator('#map canvas').boundingBox();
+  expect(canvas).not.toBeNull();
+
+  const routePoints = await page.evaluate(({ width, height }) => {
+    const map = (window as unknown as { __map: { unproject: (point: [number, number]) => { lng: number; lat: number } } }).__map;
+    const relPoints: Array<[number, number]> = [
+      [width / 2 - 110, height / 2],
+      [width / 2, height / 2 - 35],
+      [width / 2 + 110, height / 2],
+    ];
+    return relPoints.map(([x, y]) => {
+      const lngLat = map.unproject([x, y]);
+      return [lngLat.lng, lngLat.lat] as [number, number];
+    });
+  }, { width: canvas!.width, height: canvas!.height });
+
+  await page.evaluate(async (points) => {
+    const editor = (window as unknown as {
+      __networkEditor: {
+        network: {
+          addLine: (name: string, color: string, snapToExisting?: boolean) => { id: string };
+          addStation: (lng: number, lat: number, name?: string) => { id: string };
+          addStationToLine: (lineId: string, stationId: string, segmentPath?: Array<[number, number]>) => void;
+        };
+        trackRouter: {
+          findRoute: (
+            network: unknown,
+            start: [number, number],
+            end: [number, number],
+          ) => Promise<Array<[number, number]> | null>;
+        };
+      };
+    }).__networkEditor;
+
+    const [startPoint, middlePoint, endPoint] = points;
+    const alpha = editor.network.addLine('Alpha', '#e11d48');
+    const startStation = editor.network.addStation(startPoint[0], startPoint[1], 'Alpha Start');
+    const middleStation = editor.network.addStation(middlePoint[0], middlePoint[1], 'Alpha Mid');
+    const endStation = editor.network.addStation(endPoint[0], endPoint[1], 'Alpha End');
+
+    editor.network.addStationToLine(alpha.id, startStation.id);
+    editor.network.addStationToLine(alpha.id, middleStation.id);
+    editor.network.addStationToLine(alpha.id, endStation.id);
+
+    const beta = editor.network.addLine('Beta', '#2563eb', true);
+    editor.network.addStationToLine(beta.id, startStation.id);
+    const route = await editor.trackRouter.findRoute(editor.network, startPoint, endPoint);
+    if (!route) throw new Error('Expected a reusable user-line route.');
+    editor.network.addStationToLine(beta.id, endStation.id, route);
+  }, routePoints);
+
+  await page.waitForFunction(() => {
+    const getFeatures = (sourceId: string) => {
+      const map = (window as unknown as {
+        __map: { getSource: (id: string) => { _data?: { features?: unknown[]; geojson?: { features?: unknown[] } } } };
+      }).__map;
+      const data = map.getSource(sourceId)?._data;
+      if (Array.isArray(data?.features)) return data.features;
+      if (Array.isArray(data?.geojson?.features)) return data.geojson.features;
+      return [];
+    };
+
+    return getFeatures('network-line-cases').length === 2
+      && getFeatures('network-line-segments').length === 4;
+  });
+
+  const rendered = await page.evaluate(() => {
+    const getFeatures = (sourceId: string) => {
+      const map = (window as unknown as {
+        __map: { getSource: (id: string) => { _data?: { features?: Array<{ properties?: Record<string, unknown> }>; geojson?: { features?: Array<{ properties?: Record<string, unknown> }> } } } };
+      }).__map;
+      const data = map.getSource(sourceId)?._data;
+      if (Array.isArray(data?.features)) return data.features;
+      if (Array.isArray(data?.geojson?.features)) return data.geojson.features;
+      return [];
+    };
+
+    const casingFeatures = getFeatures('network-line-cases');
+    const segmentFeatures = getFeatures('network-line-segments');
+    return {
+      casingCount: casingFeatures.length,
+      segmentCount: segmentFeatures.length,
+      offsets: segmentFeatures.map((feature) => Number(feature.properties?.offset ?? 0)),
+    };
+  });
+
+  expect(rendered.casingCount).toBe(2);
+  expect(rendered.segmentCount).toBe(4);
+  expect(rendered.offsets.filter((offset) => Math.abs(offset) > 0.1)).toHaveLength(4);
 });
 
 // ── Color swatches ─────────────────────────────────────────────────────────────
@@ -1027,6 +1298,47 @@ test('clicking the end-to-end card opens the journey profile graph', async ({ pa
   await expect(page.locator('#journey-profile-tooltip')).toBeVisible();
   await expect(page.locator('#journey-profile-tooltip')).toContainText('km/h');
   await expect(page.locator('#journey-profile-hover-readout')).not.toHaveText('Hover the curve for details');
+});
+
+test('line manager shows a popularity estimate and opens the popularity model modal', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-name').fill('Demand Line');
+  await page.locator('#new-line-add').click();
+
+  const canvas = await page.locator('#map canvas').boundingBox();
+  const cx = canvas!.x + canvas!.width / 2;
+  const cy = canvas!.y + canvas!.height / 2;
+  await page.mouse.click(cx - 120, cy);
+  await page.mouse.click(cx - 10, cy - 25);
+  await page.mouse.click(cx + 105, cy);
+  await page.waitForTimeout(300);
+
+  await page.evaluate(() => {
+    const editor = (window as unknown as {
+      __networkEditor: {
+        network: {
+          lines: Array<{ id: string }>;
+          setLineTrain: (lineId: string, rollingStockId: string, trainCount?: number) => void;
+        };
+      };
+    }).__networkEditor;
+    editor.network.setLineTrain(editor.network.lines[0].id, 'class-700', 6);
+  });
+
+  await expect(page.locator('#lm-stats-loading')).toBeHidden({ timeout: 30_000 });
+  await expect(page.locator('#lm-open-demand-model')).toBeEnabled({ timeout: 30_000 });
+  await expect(page.locator('#lm-ls-demand')).not.toHaveText('—');
+  await expect(page.locator('#lm-ls-demand-band')).not.toContainText('Loading');
+
+  await page.locator('#lm-open-demand-model').click();
+
+  await expect(page.locator('#line-demand-modal')).toBeVisible();
+  await expect(page.locator('#line-demand-title')).toContainText('Line popularity model');
+  await expect(page.locator('#line-demand-estimate')).not.toHaveText('—');
+  await expect(page.locator('#line-demand-methodology')).toContainText('sketch-planning demand model');
 });
 
 test('line manager shows empty stop message when line has no stops', async ({ page }) => {
