@@ -7,28 +7,40 @@ async function waitForMapLoad(page: import('@playwright/test').Page) {
   await page.waitForFunction(() => (window as unknown as Record<string, unknown>)['__mapState'] === 'loaded', { timeout: 20_000 });
 }
 
+async function waitForCensusLayer(page: import('@playwright/test').Page, layerId = 'census-msoa-fill') {
+  await page.waitForFunction((targetLayerId) => {
+    const map = (window as unknown as { __map?: {
+      getLayer: (id: string) => unknown;
+      getLayoutProperty: (id: string, name: string) => unknown;
+    } }).__map;
+    if (!map?.getLayer(targetLayerId)) return false;
+    return map.getLayoutProperty(targetLayerId, 'visibility') === 'visible';
+  }, layerId, { timeout: 30_000 });
+}
+
 test('map page loads', async ({ page }) => {
   await page.goto(BASE);
   await expect(page.locator('#map canvas')).toBeVisible({ timeout: 15_000 });
 });
 
-test('census panel has 4 radio options', async ({ page }) => {
+test('census panel has all metric radio options', async ({ page }) => {
   await page.goto(BASE);
-  const radios = page.locator('#census-metrics input[type="radio"]');
-  await expect(radios).toHaveCount(4);
+  const radios = page.locator('input[name="census-metric"]');
+  // off + 5 demographics + 4 transport + 2 economic + 1 accessibility = 13
+  await expect(radios).toHaveCount(13);
 });
 
 test('selecting Population radio shows loading then legend', async ({ page }) => {
   await page.goto(BASE);
   await waitForMapLoad(page);
 
-  // Click the label wrapping the Population radio (input is visually hidden)
-  await page.locator('#census-metrics label').filter({ hasText: 'Population' }).click();
+  await page.locator('#overlays-panel label').filter({ hasText: 'Population' }).click();
+  await waitForCensusLayer(page);
 
-  // Legend shows as soon as setMetric is called (even during loading)
   const legend = page.locator('#census-legend');
   await expect(legend).toBeVisible({ timeout: 30_000 });
   await expect(legend).not.toHaveCSS('display', 'none');
+  await expect(page.locator('#census-error')).toBeHidden();
 });
 
 test('census boundary data files are non-empty', async ({ page }) => {
@@ -72,16 +84,14 @@ test('switching from Population to Density keeps overlay visible', async ({ page
   await page.goto(BASE);
   await waitForMapLoad(page);
 
-  // Enable population overlay and wait for legend to appear
-  await page.locator('#census-metrics label').filter({ hasText: 'Population' }).click();
+  await page.locator('#overlays-panel label').filter({ hasText: 'Population' }).click();
+  await waitForCensusLayer(page);
   await expect(page.locator('#census-legend')).toBeVisible({ timeout: 30_000 });
 
-  // Switch to density
-  await page.locator('#census-metrics label').filter({ hasText: 'Density' }).click();
+  await page.locator('#overlays-panel label').filter({ hasText: 'Density' }).click();
+  await waitForCensusLayer(page);
 
-  // Legend should still be visible (fill-color changed, data already loaded)
   await expect(page.locator('#census-legend')).toBeVisible();
-  // No error should appear
   await expect(page.locator('#census-error')).toBeHidden();
 });
 
@@ -89,10 +99,22 @@ test('switching to Off hides legend', async ({ page }) => {
   await page.goto(BASE);
   await waitForMapLoad(page);
 
-  await page.locator('#census-metrics label').filter({ hasText: 'Population' }).click();
+  await page.locator('#overlays-panel label').filter({ hasText: 'Population' }).click();
+  await waitForCensusLayer(page);
   await expect(page.locator('#census-legend')).toBeVisible({ timeout: 30_000 });
 
-  await page.locator('#census-metrics label').filter({ hasText: 'Off' }).click();
+  await page.locator('#overlays-panel label').filter({ hasText: 'Off' }).click();
   await expect(page.locator('#census-legend')).toBeHidden();
+});
+
+test('selecting no-car overlay activates census layer', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMapLoad(page);
+
+  await page.locator('#overlays-panel label').filter({ hasText: 'No Car/Van %' }).click();
+  await waitForCensusLayer(page);
+
+  await expect(page.locator('#census-legend')).toBeVisible();
+  await expect(page.locator('#census-error')).toBeHidden();
 });
 
