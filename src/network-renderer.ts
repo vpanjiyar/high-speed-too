@@ -3,12 +3,16 @@
 
 import type { Map as MaplibreMap, GeoJSONSource } from 'maplibre-gl';
 import type { Network, Station, Line } from './network';
+import { getLineAtomicSegments, getLinePolylineCoordinates, normalizeAtomicSegmentKey } from './network-geometry';
 
 const SOURCE_STATIONS = 'network-stations';
-const SOURCE_LINES    = 'network-lines';
+const SOURCE_LINE_CASES = 'network-line-cases';
+const SOURCE_LINE_SEGMENTS = 'network-line-segments';
+const SOURCE_LINE_HIT = 'network-lines';
 
 const LAYER_LINE_CASING     = 'network-line-casing';
 const LAYER_LINE             = 'network-line';
+const LAYER_LINE_HIT         = 'network-line-hit';
 const LAYER_STATION_OUTER    = 'network-station-outer';
 const LAYER_STATION_INNER    = 'network-station-inner';
 const LAYER_STATION_LABEL    = 'network-station-label';
@@ -47,7 +51,7 @@ export class NetworkRenderer {
       [point[0] + pad, point[1] + pad],
     ];
     const features = this.map.queryRenderedFeatures(bbox, {
-      layers: [LAYER_LINE_CASING],
+      layers: [LAYER_LINE_HIT],
     });
     if (features.length > 0) {
       return (features[0].properties?.id as string) ?? null;
@@ -80,7 +84,15 @@ export class NetworkRenderer {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
     });
-    this.map.addSource(SOURCE_LINES, {
+    this.map.addSource(SOURCE_LINE_CASES, {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    });
+    this.map.addSource(SOURCE_LINE_SEGMENTS, {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    });
+    this.map.addSource(SOURCE_LINE_HIT, {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
     });
@@ -91,11 +103,11 @@ export class NetworkRenderer {
     this.map.addLayer({
       id: LAYER_LINE_CASING,
       type: 'line',
-      source: SOURCE_LINES,
+      source: SOURCE_LINE_CASES,
       paint: {
-        'line-color': ['get', 'color'],
-        'line-width': 8,
-        'line-opacity': 0.25,
+        'line-color': 'rgba(26, 26, 46, 0.24)',
+        'line-width': ['coalesce', ['get', 'width'], 8],
+        'line-opacity': 1,
       },
       layout: {
         'line-cap': 'round',
@@ -107,11 +119,27 @@ export class NetworkRenderer {
     this.map.addLayer({
       id: LAYER_LINE,
       type: 'line',
-      source: SOURCE_LINES,
+      source: SOURCE_LINE_SEGMENTS,
       paint: {
         'line-color': ['get', 'color'],
-        'line-width': 4,
-        'line-opacity': 0.9,
+        'line-width': ['coalesce', ['get', 'width'], 4],
+        'line-offset': ['coalesce', ['get', 'offset'], 0],
+        'line-opacity': 0.95,
+      },
+      layout: {
+        'line-cap': 'round',
+        'line-join': 'round',
+      },
+    });
+
+    this.map.addLayer({
+      id: LAYER_LINE_HIT,
+      type: 'line',
+      source: SOURCE_LINE_HIT,
+      paint: {
+        'line-color': '#000000',
+        'line-width': ['+', ['coalesce', ['get', 'width'], 6], 8],
+        'line-opacity': 0.01,
       },
       layout: {
         'line-cap': 'round',
@@ -212,25 +240,97 @@ export class NetworkRenderer {
   }
 
   private _updateLinesSource(): void {
-    const source = this.map.getSource(SOURCE_LINES) as GeoJSONSource | undefined;
-    if (!source) return;
+    const casingSource = this.map.getSource(SOURCE_LINE_CASES) as GeoJSONSource | undefined;
+    const segmentSource = this.map.getSource(SOURCE_LINE_SEGMENTS) as GeoJSONSource | undefined;
+    const hitSource = this.map.getSource(SOURCE_LINE_HIT) as GeoJSONSource | undefined;
+    if (!casingSource || !segmentSource || !hitSource) return;
 
-    const features = this.network.lines
-      .filter((line: Line) => line.stationIds.length >= 2)
+    const lineOrder = new Map(this.network.lines.map((line, index) => [line.id, index]));
+    const sharedSegments = new Map<string, Array<{ lineId: string; lineName: string; color: string; coordinates: [[number, number], [number, number]] }>>();
+
+    for (const line of this.network.lines) {
+      for (const segment of getLineAtomicSegments(line, this.network)) {
+        const key = normalizeAtomicSegmentKey(segment.coordinates[0], segment.coordinates[1]);
+        const members = sharedSegments.get(key);
+        const entry = {
+          lineId: segment.lineId,
+          lineName: segment.lineName,
+          color: segment.color,
+          coordinates: [
+            [segment.coordinates[0][0], segment.coordinates[0][1]],
+            [segment.coordinates[1][0], segment.coordinates[1][1]],
+          ] as [[number, number], [number, number]],
+        };
+        if (members) members.push(entry);
+        else sharedSegments.set(key, [entry]);
+      }
+    }
+
+    const casingFeatures: Array<{
+      type: 'Feature';
+      geometry: { type: 'LineString'; coordinates: [[number, number], [number, number]] };
+      properties: { width: number; lineIds: string };
+    }> = [];
+    const segmentFeatures: Array<{
+      type: 'Feature';
+      geometry: { type: 'LineString'; coordinates: [[number, number], [number, number]] };
+      properties: { id: string; name: string; color: string; width: number; offset: number };
+    }> = [];
+
+    for (const members of sharedSegments.values()) {
+      const orderedMembers = [...members].sort((a, b) => (lineOrder.get(a.lineId) ?? 0) - (lineOrder.get(b.lineId) ?? 0));
+      const casingWidth = orderedMembers.length === 1 ? 8 : Math.max(8.4, orderedMembers.length * 2.6 + 2.2);
+      const fillWidth = orderedMembers.length === 1 ? 4 : Math.max(1.7, Math.min(2.8, 5.2 / orderedMembers.length + 0.9));
+      const offsetStep = orderedMembers.length === 1 ? 0 : fillWidth + 0.5;
+
+      casingFeatures.push({
+        type: 'Feature' as const,
+        geometry: {
+          type: 'LineString' as const,
+          coordinates: orderedMembers[0]!.coordinates,
+        },
+        properties: {
+          width: casingWidth,
+          lineIds: orderedMembers.map((member) => member.lineId).join(','),
+        },
+      });
+
+      orderedMembers.forEach((member, index) => {
+        const offset = orderedMembers.length === 1
+          ? 0
+          : (index - (orderedMembers.length - 1) / 2) * offsetStep;
+        segmentFeatures.push({
+          type: 'Feature' as const,
+          geometry: {
+            type: 'LineString' as const,
+            coordinates: member.coordinates,
+          },
+          properties: {
+            id: member.lineId,
+            name: member.lineName,
+            color: member.color,
+            width: fillWidth,
+            offset,
+          },
+        });
+      });
+    }
+
+    const hitFeatures = this.network.lines
       .map((line: Line) => {
-        const coords = line.stationIds
-          .map((sid) => this.network.getStation(sid))
-          .filter((s): s is Station => !!s)
-          .map((s) => [s.lng, s.lat]);
-
+        const coords = getLinePolylineCoordinates(line, this.network);
+        if (coords.length < 2) return null;
         return {
           type: 'Feature' as const,
           geometry: { type: 'LineString' as const, coordinates: coords },
-          properties: { id: line.id, name: line.name, color: line.color },
+          properties: { id: line.id, name: line.name, color: line.color, width: 6 },
         };
-      });
+      })
+      .filter((feature): feature is NonNullable<typeof feature> => feature !== null);
 
-    source.setData({ type: 'FeatureCollection', features });
+    casingSource.setData({ type: 'FeatureCollection', features: casingFeatures });
+    segmentSource.setData({ type: 'FeatureCollection', features: segmentFeatures });
+    hitSource.setData({ type: 'FeatureCollection', features: hitFeatures });
   }
 
   private _updateStationSelection(): void {

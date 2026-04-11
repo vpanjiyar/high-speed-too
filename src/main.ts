@@ -23,6 +23,225 @@ maplibregl.addProtocol('pmtiles', protocol.tile.bind(protocol));
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+type MotionPreset = 'panel' | 'drawer' | 'modal' | 'section' | 'badge';
+type VisibilityStrategy = 'class' | 'display';
+
+type VisibilityOptions = {
+  preset: MotionPreset;
+  strategy?: VisibilityStrategy;
+  displayValue?: string;
+  surfaceSelector?: string;
+};
+
+type ActiveVisibilityMotion = {
+  token: symbol;
+  animations: Animation[];
+};
+
+const activeVisibilityMotions = new WeakMap<HTMLElement, ActiveVisibilityMotion>();
+
+function getVisibilityMotion(
+  preset: MotionPreset,
+  visible: boolean,
+): { duration: number; easing: string; root: Keyframe[]; surface?: Keyframe[] } {
+  const enterEasing = 'cubic-bezier(0.22, 1.24, 0.36, 1)';
+  const exitEasing = 'cubic-bezier(0.4, 0, 0.2, 1)';
+
+  switch (preset) {
+    case 'drawer':
+      return {
+        duration: visible ? 240 : 150,
+        easing: visible ? enterEasing : exitEasing,
+        root: visible
+          ? [
+              { opacity: 0, transform: 'translateX(34px) scale(0.985)' },
+              { opacity: 1, transform: 'translateX(-6px) scale(1.01)', offset: 0.72 },
+              { opacity: 1, transform: 'translateX(0) scale(1)' },
+            ]
+          : [
+              { opacity: 1, transform: 'translateX(0) scale(1)' },
+              { opacity: 0.78, transform: 'translateX(8px) scale(0.992)', offset: 0.45 },
+              { opacity: 0, transform: 'translateX(28px) scale(0.97)' },
+            ],
+      };
+
+    case 'modal':
+      return {
+        duration: visible ? 220 : 150,
+        easing: visible ? enterEasing : exitEasing,
+        root: visible
+          ? [
+              { opacity: 0 },
+              { opacity: 1 },
+            ]
+          : [
+              { opacity: 1 },
+              { opacity: 0 },
+            ],
+        surface: visible
+          ? [
+              { opacity: 0.25, transform: 'translateY(26px) scale(0.92)' },
+              { opacity: 1, transform: 'translateY(-5px) scale(1.012)', offset: 0.72 },
+              { opacity: 1, transform: 'translateY(0) scale(1)' },
+            ]
+          : [
+              { opacity: 1, transform: 'translateY(0) scale(1)' },
+              { opacity: 0.72, transform: 'translateY(8px) scale(0.985)', offset: 0.45 },
+              { opacity: 0, transform: 'translateY(22px) scale(0.95)' },
+            ],
+      };
+
+    case 'badge':
+      return {
+        duration: visible ? 180 : 120,
+        easing: visible ? enterEasing : exitEasing,
+        root: visible
+          ? [
+              { opacity: 0, transform: 'translateY(8px) scale(0.9)' },
+              { opacity: 1, transform: 'translateY(-2px) scale(1.04)', offset: 0.65 },
+              { opacity: 1, transform: 'translateY(0) scale(1)' },
+            ]
+          : [
+              { opacity: 1, transform: 'translateY(0) scale(1)' },
+              { opacity: 0, transform: 'translateY(6px) scale(0.92)' },
+            ],
+      };
+
+    case 'section':
+      return {
+        duration: visible ? 190 : 130,
+        easing: visible ? enterEasing : exitEasing,
+        root: visible
+          ? [
+              { opacity: 0, transform: 'translateY(12px) scale(0.97)' },
+              { opacity: 1, transform: 'translateY(-2px) scale(1.01)', offset: 0.68 },
+              { opacity: 1, transform: 'translateY(0) scale(1)' },
+            ]
+          : [
+              { opacity: 1, transform: 'translateY(0) scale(1)' },
+              { opacity: 0, transform: 'translateY(8px) scale(0.96)' },
+            ],
+      };
+
+    case 'panel':
+    default:
+      return {
+        duration: visible ? 210 : 140,
+        easing: visible ? enterEasing : exitEasing,
+        root: visible
+          ? [
+              { opacity: 0, transform: 'translateY(18px) scale(0.94)' },
+              { opacity: 1, transform: 'translateY(-4px) scale(1.02)', offset: 0.7 },
+              { opacity: 1, transform: 'translateY(0) scale(1)' },
+            ]
+          : [
+              { opacity: 1, transform: 'translateY(0) scale(1)' },
+              { opacity: 0.72, transform: 'translateY(5px) scale(0.985)', offset: 0.45 },
+              { opacity: 0, transform: 'translateY(14px) scale(0.95)' },
+            ],
+      };
+  }
+}
+
+function setAnimatedVisibility(
+  element: HTMLElement,
+  visible: boolean,
+  options: VisibilityOptions,
+): void {
+  const strategy = options.strategy ?? 'class';
+  const hidden = strategy === 'class'
+    ? element.classList.contains('hidden')
+    : getComputedStyle(element).display === 'none';
+  const state = element.dataset.motionState;
+
+  if (visible) {
+    if (state === 'entering' || state === 'open') return;
+    if (!hidden && state !== 'exiting') return;
+  } else {
+    if (state === 'exiting' || state === 'closed') return;
+    if (hidden && state !== 'entering') return;
+  }
+
+  const activeMotion = activeVisibilityMotions.get(element);
+  if (activeMotion) {
+    activeMotion.animations.forEach((animation) => animation.cancel());
+    activeVisibilityMotions.delete(element);
+  }
+
+  if (visible) {
+    if (strategy === 'class') {
+      element.classList.remove('hidden');
+    } else {
+      element.style.display = options.displayValue ?? '';
+    }
+    element.setAttribute('aria-hidden', 'false');
+  }
+
+  element.dataset.motionState = visible ? 'entering' : 'exiting';
+  element.style.pointerEvents = 'none';
+
+  const motion = getVisibilityMotion(options.preset, visible);
+  const animations: Animation[] = [
+    element.animate(motion.root, {
+      duration: motion.duration,
+      easing: motion.easing,
+      fill: 'both',
+    }),
+  ];
+
+  const surface = options.surfaceSelector
+    ? element.querySelector<HTMLElement>(options.surfaceSelector)
+    : null;
+  if (surface && motion.surface) {
+    animations.push(surface.animate(motion.surface, {
+      duration: motion.duration,
+      easing: motion.easing,
+      fill: 'both',
+    }));
+  }
+
+  const token = Symbol();
+  activeVisibilityMotions.set(element, { token, animations });
+
+  void Promise.allSettled(animations.map((animation) => animation.finished.catch(() => undefined))).then(() => {
+    const currentMotion = activeVisibilityMotions.get(element);
+    if (!currentMotion || currentMotion.token !== token) return;
+
+    animations.forEach((animation) => animation.cancel());
+    activeVisibilityMotions.delete(element);
+    element.style.pointerEvents = '';
+
+    if (visible) {
+      element.dataset.motionState = 'open';
+      return;
+    }
+
+    if (strategy === 'class') {
+      element.classList.add('hidden');
+    } else {
+      element.style.display = 'none';
+    }
+    element.dataset.motionState = 'closed';
+    element.setAttribute('aria-hidden', 'true');
+  });
+}
+
+function showAnimatedClass(element: HTMLElement, preset: MotionPreset, surfaceSelector?: string): void {
+  setAnimatedVisibility(element, true, { preset, surfaceSelector });
+}
+
+function hideAnimatedClass(element: HTMLElement, preset: MotionPreset, surfaceSelector?: string): void {
+  setAnimatedVisibility(element, false, { preset, surfaceSelector });
+}
+
+function showAnimatedDisplay(element: HTMLElement, preset: MotionPreset, displayValue = ''): void {
+  setAnimatedVisibility(element, true, { preset, strategy: 'display', displayValue });
+}
+
+function hideAnimatedDisplay(element: HTMLElement, preset: MotionPreset): void {
+  setAnimatedVisibility(element, false, { preset, strategy: 'display' });
+}
+
 function resolveTilesUrl(configuredUrl: string | undefined): string {
   const fallbackUrl = `${window.location.origin}/tiles/uk.pmtiles`;
   if (!configuredUrl) return fallbackUrl;
@@ -229,6 +448,9 @@ map.on('load', () => {
   // ── Panel element references ────────────────────────────────────────────
   const smEl = document.getElementById('station-manager')!;
   const lmEl = document.getElementById('line-manager')!;
+  const linePanelEl = document.getElementById('line-panel')!;
+  const trainPickerModalEl = document.getElementById('train-picker-modal')!;
+  const importModalEl = document.getElementById('import-modal')!;
   const journeyProfileModalEl = document.getElementById('journey-profile-modal')!;
   const journeyProfileChartEl = document.getElementById('journey-profile-chart')!;
   const journeyProfileTooltipEl = document.getElementById('journey-profile-tooltip')!;
@@ -244,7 +466,7 @@ map.on('load', () => {
   let lmSuppressStopClick = false;
 
   function closeLineManager(): void {
-    lmEl.classList.add('hidden');
+    hideAnimatedClass(lmEl, 'drawer');
     smEl.classList.remove('lm-open');
     closeJourneyProfileModal();
     openLineId = null;
@@ -713,11 +935,11 @@ map.on('load', () => {
 
     openJourneyProfileLineId = lineId;
     renderJourneyProfileModal(lineId);
-    journeyProfileModalEl.classList.remove('hidden');
+    showAnimatedClass(journeyProfileModalEl, 'modal', '.journey-profile-box');
   }
 
   function closeJourneyProfileModal(): void {
-    journeyProfileModalEl.classList.add('hidden');
+    hideAnimatedClass(journeyProfileModalEl, 'modal', '.journey-profile-box');
     journeyProfileTooltipEl.classList.add('hidden');
     journeyProfileHoverReadoutEl.textContent = 'Hover the curve for details';
     openJourneyProfileLineId = null;
@@ -763,12 +985,12 @@ map.on('load', () => {
 
     if (!stats) {
       badge.textContent = '';
-      badge.classList.add('hidden');
+      hideAnimatedClass(badge, 'badge');
       return;
     }
 
     badge.textContent = `${formatDurationLabel(stats.totalTimeMin)} end-to-end`;
-    badge.classList.remove('hidden');
+    showAnimatedClass(badge, 'badge');
   }
 
   function moveLmStop(lineId: string, fromIndex: number, targetIndex: number, placeAfter: boolean): void {
@@ -952,9 +1174,9 @@ map.on('load', () => {
     const grid = document.getElementById('lm-stats-grid')!;
     const loadingEl = document.getElementById('lm-stats-loading')!;
     const errorEl = document.getElementById('lm-stats-error')!;
-    grid.style.display = 'none';
-    loadingEl.classList.remove('hidden');
-    errorEl.classList.add('hidden');
+    hideAnimatedDisplay(grid, 'section');
+    showAnimatedClass(loadingEl, 'section');
+    hideAnimatedClass(errorEl, 'section');
 
     const stations = line.stationIds
       .map((id) => editor.network.getStation(id))
@@ -962,23 +1184,23 @@ map.on('load', () => {
 
     fetchLineCatchmentStats(stations).then((stats) => {
       if (openLineId !== lineId) return;
-      loadingEl.classList.add('hidden');
+      hideAnimatedClass(loadingEl, 'section');
       if (stats.lsoaCount === 0) {
         errorEl.textContent = line.stationIds.length === 0
           ? 'Add stops to see catchment data.'
           : 'No census data nearby.';
-        errorEl.classList.remove('hidden');
+        showAnimatedClass(errorEl, 'section');
         return;
       }
       document.getElementById('lm-stat-pop')!.textContent     = stats.population.toLocaleString('en-GB');
       document.getElementById('lm-stat-workers')!.textContent  = stats.workingAge.toLocaleString('en-GB');
       document.getElementById('lm-stat-pct')!.textContent      = `${stats.workingAgePct.toFixed(1)}%`;
       document.getElementById('lm-stat-density')!.textContent  = stats.densityPerHa.toFixed(1);
-      grid.style.display = 'grid';
+      showAnimatedDisplay(grid, 'section', 'grid');
     }).catch(() => {
-      loadingEl.classList.add('hidden');
+      hideAnimatedClass(loadingEl, 'section');
       errorEl.textContent = 'Failed to load census data.';
-      errorEl.classList.remove('hidden');
+      showAnimatedClass(errorEl, 'section');
     });
   }
 
@@ -1007,8 +1229,8 @@ map.on('load', () => {
     if (line.rollingStockId) {
       const stock = getRollingStock(line.rollingStockId);
       if (stock) {
-        selector.style.display = 'none';
-        info.classList.remove('hidden');
+        hideAnimatedDisplay(selector, 'section');
+        showAnimatedClass(info, 'section');
         renderTrainCard(stock);
         countInput.value = String(line.trainCount ?? 1);
         renderLmTotalTime(lineId);
@@ -1016,20 +1238,20 @@ map.on('load', () => {
         return;
       }
     }
-    selector.style.display = '';
-    info.classList.add('hidden');
-    document.getElementById('lm-line-stats')!.classList.add('hidden');
+    showAnimatedDisplay(selector, 'section');
+    hideAnimatedClass(info, 'section');
+    hideAnimatedClass(document.getElementById('lm-line-stats')!, 'section');
     renderLmTotalTime(lineId);
   }
 
   function refreshLineStats(lineId: string): void {
     const stats = getLineTravelStats(lineId);
     if (!stats) {
-      document.getElementById('lm-line-stats')!.classList.add('hidden');
+      hideAnimatedClass(document.getElementById('lm-line-stats')!, 'section');
       return;
     }
     const el = document.getElementById('lm-line-stats')!;
-    el.classList.remove('hidden');
+    showAnimatedClass(el, 'section');
 
     document.getElementById('lm-ls-distance')!.textContent = `${stats.totalDistanceKm.toFixed(1)} km`;
     document.getElementById('lm-ls-time')!.textContent = formatDurationLabel(stats.totalTimeMin);
@@ -1040,7 +1262,7 @@ map.on('load', () => {
   }
 
   function openTrainPicker(lineId: string): void {
-    const modal = document.getElementById('train-picker-modal')!;
+    const modal = trainPickerModalEl;
     const list = document.getElementById('train-picker-list')!;
     list.innerHTML = '';
 
@@ -1083,7 +1305,7 @@ map.on('load', () => {
 
         item.addEventListener('click', () => {
           editor.network.setLineTrain(lineId, train.id, 1);
-          modal.classList.add('hidden');
+          hideAnimatedClass(modal, 'modal', '.train-picker-box');
           renderLmTrain(lineId);
         });
 
@@ -1091,7 +1313,7 @@ map.on('load', () => {
       }
     }
 
-    modal.classList.remove('hidden');
+    showAnimatedClass(modal, 'modal', '.train-picker-box');
   }
 
   function openLineManager(lineId: string): void {
@@ -1099,7 +1321,7 @@ map.on('load', () => {
     if (!line) return;
     const wasAlreadyOpen = openLineId === lineId;
     openLineId = lineId;
-    lmEl.classList.remove('hidden');
+    showAnimatedClass(lmEl, 'drawer');
     smEl.classList.add('lm-open');   // shift SM left of LM
 
     (document.getElementById('line-manager-name') as HTMLInputElement).value = line.name;
@@ -1122,7 +1344,7 @@ map.on('load', () => {
   let smCensusStationId: string | null = null;
 
   function closeStationManager(): void {
-    smEl.classList.add('hidden');
+    hideAnimatedClass(smEl, 'drawer');
     smCensusStationId = null;
   }
 
@@ -1168,7 +1390,7 @@ map.on('load', () => {
     const station = editor.network.getStation(stationId);
     if (!station) return;
 
-    smEl.classList.remove('hidden');
+    showAnimatedClass(smEl, 'drawer');
 
     // Always update name + lines (may have changed)
     (document.getElementById('station-manager-name') as HTMLInputElement).value = station.name;
@@ -1181,27 +1403,27 @@ map.on('load', () => {
       const grid = document.getElementById('sm-stats-grid')!;
       const loadingEl = document.getElementById('sm-stats-loading')!;
       const errorEl = document.getElementById('sm-stats-error')!;
-      grid.style.display = 'none';
-      loadingEl.classList.remove('hidden');
-      errorEl.classList.add('hidden');
+      hideAnimatedDisplay(grid, 'section');
+      showAnimatedClass(loadingEl, 'section');
+      hideAnimatedClass(errorEl, 'section');
 
       fetchCatchmentStats(station.lng, station.lat).then((stats) => {
         if (smCensusStationId !== stationId) return;
-        loadingEl.classList.add('hidden');
+        hideAnimatedClass(loadingEl, 'section');
         if (stats.lsoaCount === 0) {
           errorEl.textContent = 'No census data nearby.';
-          errorEl.classList.remove('hidden');
+          showAnimatedClass(errorEl, 'section');
           return;
         }
         document.getElementById('sm-stat-pop')!.textContent     = stats.population.toLocaleString('en-GB');
         document.getElementById('sm-stat-workers')!.textContent  = stats.workingAge.toLocaleString('en-GB');
         document.getElementById('sm-stat-pct')!.textContent      = `${stats.workingAgePct.toFixed(1)}%`;
         document.getElementById('sm-stat-density')!.textContent  = stats.densityPerHa.toFixed(1);
-        grid.style.display = 'grid';
+        showAnimatedDisplay(grid, 'section', 'grid');
       }).catch(() => {
-        loadingEl.classList.add('hidden');
+        hideAnimatedClass(loadingEl, 'section');
         errorEl.textContent = 'Failed to load census data.';
-        errorEl.classList.remove('hidden');
+        showAnimatedClass(errorEl, 'section');
       });
     }
   }
@@ -1213,11 +1435,35 @@ map.on('load', () => {
       btn.classList.toggle('active', btn.id.replace('tool-', '') === state.mode);
     });
 
-    const doneBtn = document.getElementById('tool-done') as HTMLElement | null;
-    if (doneBtn) doneBtn.style.display = (state.mode === 'station' || state.mode === 'line') ? '' : 'none';
+    const snapCheckbox = document.getElementById('new-line-snap') as HTMLInputElement | null;
+    const snapHelp = document.getElementById('new-line-snap-help');
+    const activeLine = state.activeLineId ? editor.network.getLine(state.activeLineId) : null;
+    if (snapCheckbox) {
+      snapCheckbox.checked = activeLine ? activeLine.snapToExisting === true : selectedSnapToExisting;
+      snapCheckbox.disabled = !!activeLine && (!state.snapToExistingAvailable || state.snapToExistingBusy);
+    }
+    if (snapHelp) {
+      snapHelp.textContent = state.snapToExistingBusy
+        ? 'Checking nearby tracks…'
+        : activeLine && !state.snapToExistingAvailable
+          ? (state.snapToExistingReason ?? 'No existing route is available from the current endpoint.')
+          : 'Reuse National Rail or previously drawn track where possible.';
+    }
 
-    const linePanel = document.getElementById('line-panel')!;
-    linePanel.classList.toggle('hidden', state.mode !== 'line');
+    const doneBtn = document.getElementById('tool-done') as HTMLElement | null;
+    if (doneBtn) {
+      if (state.mode === 'station' || state.mode === 'line') {
+        showAnimatedDisplay(doneBtn, 'badge');
+      } else {
+        hideAnimatedDisplay(doneBtn, 'badge');
+      }
+    }
+
+    if (state.mode === 'line') {
+      showAnimatedClass(linePanelEl, 'panel');
+    } else {
+      hideAnimatedClass(linePanelEl, 'panel');
+    }
 
     // Undo / redo button state
     const undoBtn = document.getElementById('btn-undo') as HTMLButtonElement | null;
@@ -1320,10 +1566,10 @@ map.on('load', () => {
     btn.addEventListener('click', () => {
       if (mode === 'line') {
         editor.setMode('line');
-        document.getElementById('line-panel')!.classList.remove('hidden');
+        showAnimatedClass(linePanelEl, 'panel');
       } else {
         editor.setMode(mode as 'select' | 'station');
-        document.getElementById('line-panel')!.classList.add('hidden');
+        hideAnimatedClass(linePanelEl, 'panel');
         if (mode !== 'select') {
           closeStationManager();
           closeLineManager();
@@ -1335,7 +1581,7 @@ map.on('load', () => {
   // Done button (exits station/line mode back to select)
   document.getElementById('tool-done')!.addEventListener('click', () => {
     editor.setMode('select');
-    document.getElementById('line-panel')!.classList.add('hidden');
+    hideAnimatedClass(linePanelEl, 'panel');
   });
 
   // Clear button
@@ -1350,7 +1596,7 @@ map.on('load', () => {
 
   // Line panel close
   document.getElementById('line-panel-close')!.addEventListener('click', () => {
-    document.getElementById('line-panel')!.classList.add('hidden');
+    hideAnimatedClass(linePanelEl, 'panel');
     editor.setMode('select');
   });
 
@@ -1463,11 +1709,11 @@ map.on('load', () => {
 
   // Train picker modal cancel / backdrop close
   document.getElementById('train-picker-cancel')!.addEventListener('click', () => {
-    document.getElementById('train-picker-modal')!.classList.add('hidden');
+    hideAnimatedClass(trainPickerModalEl, 'modal', '.train-picker-box');
   });
-  document.getElementById('train-picker-modal')!.addEventListener('click', (e) => {
+  trainPickerModalEl.addEventListener('click', (e) => {
     if (e.target === e.currentTarget) {
-      document.getElementById('train-picker-modal')!.classList.add('hidden');
+      hideAnimatedClass(trainPickerModalEl, 'modal', '.train-picker-box');
     }
   });
 
@@ -1485,7 +1731,9 @@ map.on('load', () => {
 
   // Color swatches for new line
   const colorContainer = document.getElementById('new-line-colors')!;
+  const snapCheckbox = document.getElementById('new-line-snap') as HTMLInputElement;
   let selectedColor = editor.network.nextColor();
+  let selectedSnapToExisting = false;
 
   function renderColorSwatches(): void {
     colorContainer.innerHTML = '';
@@ -1502,11 +1750,18 @@ map.on('load', () => {
   }
   renderColorSwatches();
 
+  snapCheckbox.addEventListener('change', () => {
+    selectedSnapToExisting = snapCheckbox.checked;
+    if (editor.getState().activeLineId) {
+      editor.setActiveLineSnapToExisting(snapCheckbox.checked);
+    }
+  });
+
   // Add line button
   document.getElementById('new-line-add')!.addEventListener('click', () => {
     const nameInput = document.getElementById('new-line-name') as HTMLInputElement;
     const name = nameInput.value.trim() || `Line ${editor.network.lines.length + 1}`;
-    editor.createLine(name, selectedColor);
+    editor.createLine(name, selectedColor, selectedSnapToExisting);
     nameInput.value = '';
     selectedColor = editor.network.nextColor();
     renderColorSwatches();
@@ -1571,7 +1826,7 @@ map.on('load', () => {
     if (!_pendingImport) return;
     const data = _pendingImport;
     _pendingImport = null;
-    document.getElementById('import-modal')!.classList.add('hidden');
+    hideAnimatedClass(importModalEl, 'modal', '.modal-box');
     closeLineManager();
     closeStationManager();
     editor.importNetwork(data.network, merge);
@@ -1579,12 +1834,12 @@ map.on('load', () => {
 
   function openImportModal(payload: NetworkExport): void {
     _pendingImport = payload;
-    document.getElementById('import-modal')!.classList.remove('hidden');
+    showAnimatedClass(importModalEl, 'modal', '.modal-box');
   }
 
   function closeImportModal(): void {
     _pendingImport = null;
-    document.getElementById('import-modal')!.classList.add('hidden');
+    hideAnimatedClass(importModalEl, 'modal', '.modal-box');
   }
 
   document.getElementById('import-btn-replace')!.addEventListener('click', () => {
@@ -1600,7 +1855,7 @@ map.on('load', () => {
   });
 
   // Close modal on backdrop click
-  document.getElementById('import-modal')!.addEventListener('click', (e) => {
+  importModalEl.addEventListener('click', (e: MouseEvent) => {
     if (e.target === e.currentTarget) closeImportModal();
   });
 
@@ -1669,22 +1924,22 @@ map.on('load', () => {
   }
 
   function openExportModal(): void {
-    exportStepLines.classList.remove('hidden');
-    exportStepStyle.classList.add('hidden');
-    exportBtnNext.classList.remove('hidden');
-    exportBtnBack.classList.add('hidden');
-    exportBtnExport.classList.add('hidden');
+    showAnimatedClass(exportStepLines, 'section');
+    hideAnimatedClass(exportStepStyle, 'section');
+    showAnimatedClass(exportBtnNext, 'badge');
+    hideAnimatedClass(exportBtnBack, 'badge');
+    hideAnimatedClass(exportBtnExport, 'badge');
 
     // Populate line list
     exportLineList.innerHTML = '';
     const lines = editor.network.lines;
 
     if (lines.length === 0) {
-      exportNoLines.classList.remove('hidden');
-      exportBtnNext.classList.add('hidden');
+      showAnimatedClass(exportNoLines, 'section');
+      hideAnimatedClass(exportBtnNext, 'badge');
     } else {
-      exportNoLines.classList.add('hidden');
-      exportBtnNext.classList.remove('hidden');
+      hideAnimatedClass(exportNoLines, 'section');
+      showAnimatedClass(exportBtnNext, 'badge');
       for (const line of lines) {
         const item = document.createElement('label');
         item.className = 'export-line-item';
@@ -1720,11 +1975,11 @@ map.on('load', () => {
       }
     }
 
-    exportModal.classList.remove('hidden');
+    showAnimatedClass(exportModal, 'modal', '.export-modal-box');
   }
 
   function closeExportModal(): void {
-    exportModal.classList.add('hidden');
+    hideAnimatedClass(exportModal, 'modal', '.export-modal-box');
   }
 
   function getSelectedExportLineIds(): string[] {
@@ -1738,20 +1993,20 @@ map.on('load', () => {
       alert('Please select at least one line to export.');
       return;
     }
-    exportStepLines.classList.add('hidden');
-    exportStepStyle.classList.remove('hidden');
-    exportBtnNext.classList.add('hidden');
-    exportBtnBack.classList.remove('hidden');
-    exportBtnExport.classList.remove('hidden');
+    hideAnimatedClass(exportStepLines, 'section');
+    showAnimatedClass(exportStepStyle, 'section');
+    hideAnimatedClass(exportBtnNext, 'badge');
+    showAnimatedClass(exportBtnBack, 'badge');
+    showAnimatedClass(exportBtnExport, 'badge');
     renderExportPreview();
   });
 
   exportBtnBack.addEventListener('click', () => {
-    exportStepLines.classList.remove('hidden');
-    exportStepStyle.classList.add('hidden');
-    exportBtnNext.classList.remove('hidden');
-    exportBtnBack.classList.add('hidden');
-    exportBtnExport.classList.add('hidden');
+    showAnimatedClass(exportStepLines, 'section');
+    hideAnimatedClass(exportStepStyle, 'section');
+    showAnimatedClass(exportBtnNext, 'badge');
+    hideAnimatedClass(exportBtnBack, 'badge');
+    hideAnimatedClass(exportBtnExport, 'badge');
   });
 
   exportBtnExport.addEventListener('click', () => {
@@ -1794,7 +2049,13 @@ function updateCensusUI(state: CensusOverlayState): void {
 
   // Loading spinner
   const spinner = document.getElementById('census-loading');
-  if (spinner) spinner.style.display = state.loading ? 'inline' : 'none';
+  if (spinner) {
+    if (state.loading) {
+      showAnimatedDisplay(spinner, 'badge', 'inline');
+    } else {
+      hideAnimatedDisplay(spinner, 'badge');
+    }
+  }
 
   // Colour legend
   const legend = document.getElementById('census-legend');
@@ -1807,9 +2068,9 @@ function updateCensusUI(state: CensusOverlayState): void {
       const maxEl = document.getElementById('census-legend-max');
       if (minEl) minEl.textContent = cfg.minLabel;
       if (maxEl) maxEl.textContent = cfg.maxLabel;
-      legend.style.display = 'block';
+      showAnimatedDisplay(legend, 'section', 'block');
     } else {
-      legend.style.display = 'none';
+      hideAnimatedDisplay(legend, 'section');
     }
   }
 
@@ -1817,7 +2078,11 @@ function updateCensusUI(state: CensusOverlayState): void {
   const errEl = document.getElementById('census-error');
   if (errEl) {
     errEl.textContent = state.error ?? '';
-    errEl.style.display = state.error ? 'block' : 'none';
+    if (state.error) {
+      showAnimatedDisplay(errEl, 'section', 'block');
+    } else {
+      hideAnimatedDisplay(errEl, 'section');
+    }
   }
 
   // Last updated
@@ -1827,9 +2092,9 @@ function updateCensusUI(state: CensusOverlayState): void {
       updatedEl.textContent = 'Updated ' + state.lastModified.toLocaleDateString('en-GB', {
         day: 'numeric', month: 'short', year: 'numeric',
       });
-      updatedEl.style.display = 'block';
+      showAnimatedDisplay(updatedEl, 'badge', 'block');
     } else {
-      updatedEl.style.display = 'none';
+      hideAnimatedDisplay(updatedEl, 'badge');
     }
   }
 }

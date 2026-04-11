@@ -117,7 +117,7 @@
         </div>
 
         <!-- Demographics accordion -->
-        <details class="overlay-accordion census-accordion">
+        <details class="overlay-accordion census-accordion" open>
           <summary class="overlay-accordion-header">Demographics</summary>
           <div class="overlay-accordion-body">
             <fieldset class="census-metrics-group">
@@ -156,7 +156,7 @@
         </details>
 
         <!-- Transport accordion -->
-        <details class="overlay-accordion census-accordion">
+        <details class="overlay-accordion census-accordion" open>
           <summary class="overlay-accordion-header">Transport</summary>
           <div class="overlay-accordion-body">
             <fieldset class="census-metrics-group">
@@ -189,7 +189,7 @@
         </details>
 
         <!-- Economic accordion -->
-        <details class="overlay-accordion census-accordion">
+        <details class="overlay-accordion census-accordion" open>
           <summary class="overlay-accordion-header">Economic</summary>
           <div class="overlay-accordion-body">
             <fieldset class="census-metrics-group">
@@ -210,7 +210,7 @@
         </details>
 
         <!-- Accessibility accordion -->
-        <details class="overlay-accordion census-accordion">
+        <details class="overlay-accordion census-accordion" open>
           <summary class="overlay-accordion-header">Accessibility</summary>
           <div class="overlay-accordion-body">
             <fieldset class="census-metrics-group">
@@ -277,6 +277,11 @@
         <div id="new-line-form">
           <input id="new-line-name" type="text" placeholder="Line name…" maxlength="40" autocomplete="off" />
           <div id="new-line-colors"></div>
+          <label id="new-line-snap-row" for="new-line-snap">
+            <input id="new-line-snap" type="checkbox" />
+            <span>Snap to Existing</span>
+          </label>
+          <div id="new-line-snap-help">Reuse National Rail or previously drawn track where possible.</div>
           <button id="new-line-add" class="btn-primary">Add Line</button>
         </div>
 
