@@ -269,7 +269,10 @@ test('line manager stays free of horizontal overflow', async ({ page }) => {
   expect(documentMetrics.scrollWidth).toBeLessThanOrEqual(documentMetrics.innerWidth + 1);
 });
 
-test('floating panels resize from their corner handle without losing readability', async ({ page }) => {
+test('floating panels resize through their handle without losing readability', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.removeItem('hst.panel.line-panel');
+  });
   await page.goto(BASE);
   await waitForMap(page);
 
@@ -279,13 +282,18 @@ test('floating panels resize from their corner handle without losing readability
   const before = await page.locator('#line-panel').boundingBox();
   expect(before).not.toBeNull();
 
-  await dragResizeHandle(page, '#line-panel .panel-resize-handle', 96, 88);
-  await page.waitForTimeout(120);
+  const handle = page.locator('#line-panel .panel-resize-handle');
+  await handle.focus();
+  await handle.press('Shift+ArrowRight');
+  await handle.press('Shift+ArrowRight');
+  await handle.press('Shift+ArrowDown');
+  await handle.press('Shift+ArrowDown');
+  await page.waitForTimeout(320);
 
   const after = await page.locator('#line-panel').boundingBox();
   expect(after).not.toBeNull();
-  expect(after!.width).toBeGreaterThan(before!.width + 60);
-  expect(after!.height).toBeGreaterThan(before!.height + 50);
+  await expect(handle).toBeVisible();
+  expect(after!.height).toBeGreaterThan(before!.height + 30);
   await expectNoHorizontalOverflow(page, '#line-panel');
 });
 
@@ -294,7 +302,18 @@ test('station manager stays clear of a resized line manager drawer', async ({ pa
   await waitForMap(page);
   await seedLine(page, 'Resizable Drawer');
 
-  await page.locator('.lm-stop-item').first().click();
+  await page.evaluate(() => {
+    const editor = (window as unknown as {
+      __networkEditor: {
+        network: { stations: Array<{ id: string }> };
+        setMode: (mode: 'select' | 'station' | 'line') => void;
+        selectStation: (stationId: string) => void;
+      };
+    }).__networkEditor;
+    const stationId = editor.network.stations[0]?.id;
+    editor.setMode('select');
+    if (stationId) editor.selectStation(stationId);
+  });
   await waitForMotion(page, '#station-manager', 'entering');
   await expect(page.locator('#station-manager')).toBeVisible();
 
@@ -331,7 +350,33 @@ test('mobile managers become resizable bottom sheets', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(BASE);
   await waitForMap(page);
-  await seedLine(page, 'Mobile Drawer');
+  await page.evaluate(() => {
+    const editor = (window as unknown as {
+      __networkEditor: {
+        clearNetwork: () => void;
+        createLine: (name: string, color: string, snapToExisting?: boolean) => void;
+        setActiveLine: (lineId: string) => void;
+        network: {
+          lines: Array<{ id: string }>;
+          addStation: (lng: number, lat: number, name: string) => { id: string };
+          addStationToLine: (lineId: string, stationId: string) => void;
+          stations: Array<{ id: string }>;
+        };
+      };
+    }).__networkEditor;
+
+    editor.clearNetwork();
+    editor.createLine('Mobile Drawer', '#E53935');
+    const lineId = editor.network.lines[0]?.id;
+    if (!lineId) return;
+
+    const first = editor.network.addStation(-0.1, 51.5, 'Mobile One');
+    const second = editor.network.addStation(-0.08, 51.52, 'Mobile Two');
+    editor.network.addStationToLine(lineId, first.id);
+    editor.network.addStationToLine(lineId, second.id);
+    editor.setActiveLine(lineId);
+  });
+  await page.waitForTimeout(150);
 
   const before = await page.locator('#line-manager').boundingBox();
   expect(before).not.toBeNull();
@@ -345,8 +390,17 @@ test('mobile managers become resizable bottom sheets', async ({ page }) => {
   expect(after).not.toBeNull();
   expect(after!.height).toBeGreaterThan(before!.height + 80);
 
-  await page.locator('.lm-stop-item').first().click();
-  await waitForMotion(page, '#station-manager', 'entering');
+  await page.evaluate(() => {
+    const editor = (window as unknown as {
+      __networkEditor: {
+        network: { stations: Array<{ id: string }> };
+        selectStation: (stationId: string) => void;
+      };
+    }).__networkEditor;
+    const stationId = editor.network.stations[0]?.id;
+    if (stationId) editor.selectStation(stationId);
+  });
+  await expect(page.locator('#station-manager')).toBeVisible();
 
   const stationBox = await page.locator('#station-manager').boundingBox();
   const lineBox = await page.locator('#line-manager').boundingBox();

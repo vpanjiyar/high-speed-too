@@ -1819,8 +1819,8 @@ body.panel-resizing * {
 
   #station-manager.lm-open {
     right: 10px;
-    bottom: calc(var(--mobile-toolbar-offset) + var(--line-manager-height) + var(--panel-stack-gap));
-    max-height: calc(100dvh - var(--mobile-toolbar-offset) - var(--line-manager-height) - 84px);
+    bottom: calc(var(--mobile-toolbar-offset) + var(--line-manager-height) + var(--panel-stack-gap) + 24px);
+    max-height: calc(100dvh - var(--mobile-toolbar-offset) - var(--line-manager-height) - 108px);
   }
 
   #station-manager-header,

@@ -1,10 +1,5 @@
 Things that might be good:
 
-Line utilisation
-Animations
-Snap to existing lines
-
-Make panels adjustable
 Improve map exports
 Other views ? idk which ones though
 AI.md or something
@@ -12,7 +7,13 @@ Big refactor ?
 Custom theme for brand
 Icon !
 Curves in track affect speed
+Improve snap to existing lines
+Improve cursor choice
 
+DONE: Animations
+DONE: Snap to existing lines
+DONE: Line utilisation
+DONE: Make panels adjustable
 DONE: More census data
 DONE: Acceleration Graph
 DONE: Reorder stations
