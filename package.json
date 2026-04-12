@@ -19,7 +19,8 @@
     "diagnostic": "node scripts/diagnostic.mjs",
     "census": "python tools/census_processor.py",
     "geography": "python tools/geography_processor.py --merge-census",
-    "census-merge": "npm run census && npm run geography"
+    "census-merge": "npm run census && npm run geography",
+    "shrink-geojson": "python scripts/simplify_geojson.py public/data/lsoa_boundaries.geojson"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

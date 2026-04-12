@@ -1305,6 +1305,47 @@ test('clicking the end-to-end card opens the journey profile graph', async ({ pa
   await expect(page.locator('#journey-profile-hover-readout')).not.toHaveText('Hover the curve for details');
 });
 
+test('line manager shows a popularity estimate and opens the popularity model modal', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#tool-line').click();
+  await page.locator('#new-line-name').fill('Demand Line');
+  await page.locator('#new-line-add').click();
+
+  const canvas = await page.locator('#map canvas').boundingBox();
+  const cx = canvas!.x + canvas!.width / 2;
+  const cy = canvas!.y + canvas!.height / 2;
+  await page.mouse.click(cx - 120, cy);
+  await page.mouse.click(cx - 10, cy - 25);
+  await page.mouse.click(cx + 105, cy);
+  await page.waitForTimeout(300);
+
+  await page.evaluate(() => {
+    const editor = (window as unknown as {
+      __networkEditor: {
+        network: {
+          lines: Array<{ id: string }>;
+          setLineTrain: (lineId: string, rollingStockId: string, trainCount?: number) => void;
+        };
+      };
+    }).__networkEditor;
+    editor.network.setLineTrain(editor.network.lines[0].id, 'class-700', 6);
+  });
+
+  await expect(page.locator('#lm-stats-loading')).toBeHidden({ timeout: 30_000 });
+  await expect(page.locator('#lm-open-demand-model')).toBeEnabled({ timeout: 30_000 });
+  await expect(page.locator('#lm-ls-demand')).not.toHaveText('—');
+  await expect(page.locator('#lm-ls-demand-band')).not.toContainText('Loading');
+
+  await page.locator('#lm-open-demand-model').click();
+
+  await expect(page.locator('#line-demand-modal')).toBeVisible();
+  await expect(page.locator('#line-demand-title')).toContainText('Line popularity model');
+  await expect(page.locator('#line-demand-estimate')).not.toHaveText('—');
+  await expect(page.locator('#line-demand-methodology')).toContainText('sketch-planning demand model');
+});
+
 test('line manager shows empty stop message when line has no stops', async ({ page }) => {
   await page.goto(BASE);
   await waitForMap(page);

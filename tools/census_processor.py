@@ -31,11 +31,11 @@ Output:
 Data sources:
     NM_2021_1 (TS001)  — total usual residents
     NM_2020_1 (TS007a) — age by 5-year groups
-    NM_2073_1 (TS045)  — car/van availability
-    NM_2074_1 (TS061)  — method of travel to work
-    NM_2075_1 (TS066)  — economic activity status
-    NM_2063_1 (TS054)  — housing tenure
-    NM_2059_1 (TS038)  — disability
+    NM_2063_1 (TS045)  — car/van availability
+    NM_2078_1 (TS061)  — method of travel to work
+    NM_2083_1 (TS066)  — economic activity status
+    NM_2072_1 (TS054)  — housing tenure
+    NM_2056_1 (TS038)  — disability
     Licence: Open Government Licence v3.0
     https://www.nomisweb.co.uk/sources/census_2021
 """
@@ -62,6 +62,14 @@ LSOA_OUT     = DATA_DIR / "lsoa_census.json"
 MSOA_OUT     = DATA_DIR / "msoa_census.json"
 
 PAGE_SIZE = 25000   # NOMIS maximum rows per request
+
+DATASET_TOTAL_POP = "NM_2021_1"
+DATASET_AGE = "NM_2020_1"
+DATASET_CAR_AVAILABILITY = "NM_2063_1"
+DATASET_TRAVEL_TO_WORK = "NM_2078_1"
+DATASET_ECONOMIC_ACTIVITY = "NM_2083_1"
+DATASET_TENURE = "NM_2072_1"
+DATASET_DISABILITY = "NM_2056_1"
 
 
 # ── Download helpers ──────────────────────────────────────────────────────────
@@ -92,7 +100,14 @@ def _fetch_csv_paginated(dataset: str, geo_type: str, filters: str,
         url = base_url + f"&recordoffset={offset}"
         print(f"    offset={offset} ...", flush=True)
         raw = _get(url)
+        if offset == 0 and not raw.strip():
+            raise RuntimeError(
+                "NOMIS returned an empty response for "
+                f"{dataset}. The dataset id or filter may be invalid: {url}"
+            )
         reader = csv.DictReader(io.StringIO(raw.decode("utf-8-sig")))
+        if raw.strip() and not reader.fieldnames:
+            raise RuntimeError(f"NOMIS returned unreadable CSV for {dataset}: {url}")
         rows = list(reader)
         if not rows:
             break
@@ -137,14 +152,14 @@ def _rows_to_summed(rows: list[dict]) -> dict[str, int]:
 def fetch_total_pop(geo_type: str) -> dict[str, int]:
     """TS001: total usual residents."""
     print("  Fetching total population (TS001) ...")
-    rows = _fetch_csv_paginated("NM_2021_1", geo_type, "C2021_RESTYPE_3=0")
+    rows = _fetch_csv_paginated(DATASET_TOTAL_POP, geo_type, "C2021_RESTYPE_3=0")
     return _rows_to_single(rows)
 
 
 def fetch_working_age(geo_type: str) -> dict[str, int]:
     """TS007a: working-age population (ages 15–64, groups 4–13)."""
     print("  Fetching working-age population (TS007a) ...")
-    rows = _fetch_csv_paginated("NM_2020_1", geo_type,
+    rows = _fetch_csv_paginated(DATASET_AGE, geo_type,
                                 "C2021_AGE_19=4,5,6,7,8,9,10,11,12,13")
     return _rows_to_summed(rows)
 
@@ -152,7 +167,7 @@ def fetch_working_age(geo_type: str) -> dict[str, int]:
 def fetch_elderly(geo_type: str) -> dict[str, int]:
     """TS007a: elderly population (ages 65+, groups 14–18)."""
     print("  Fetching elderly population 65+ (TS007a) ...")
-    rows = _fetch_csv_paginated("NM_2020_1", geo_type,
+    rows = _fetch_csv_paginated(DATASET_AGE, geo_type,
                                 "C2021_AGE_19=14,15,16,17,18")
     return _rows_to_summed(rows)
 
@@ -160,7 +175,7 @@ def fetch_elderly(geo_type: str) -> dict[str, int]:
 def fetch_youth(geo_type: str) -> dict[str, int]:
     """TS007a: youth population (ages 16–24, groups 4–5)."""
     print("  Fetching youth population 16–24 (TS007a) ...")
-    rows = _fetch_csv_paginated("NM_2020_1", geo_type,
+    rows = _fetch_csv_paginated(DATASET_AGE, geo_type,
                                 "C2021_AGE_19=4,5")
     return _rows_to_summed(rows)
 
@@ -169,9 +184,9 @@ def fetch_car_availability(geo_type: str) -> dict[str, dict[str, int]]:
     """TS045: car/van availability. Returns {code: {no_car, households}}."""
     # Category 1 = no cars/vans, Category 0 = total (all categories)
     print("  Fetching car availability (TS045) ...")
-    rows_no_car = _fetch_csv_paginated("NM_2073_1", geo_type,
+    rows_no_car = _fetch_csv_paginated(DATASET_CAR_AVAILABILITY, geo_type,
                                        "C2021_CARS_5=1")
-    rows_total = _fetch_csv_paginated("NM_2073_1", geo_type,
+    rows_total = _fetch_csv_paginated(DATASET_CAR_AVAILABILITY, geo_type,
                                       "C2021_CARS_5=0")
     no_car = _rows_to_single(rows_no_car)
     total = _rows_to_single(rows_total)
@@ -189,21 +204,15 @@ def fetch_car_availability(geo_type: str) -> dict[str, dict[str, int]]:
 def fetch_travel_to_work(geo_type: str) -> dict[str, dict[str, int]]:
     """TS061: method of travel to work.
     Returns {code: {travel_train, travel_bus, travel_drive, travel_total}}.
-    Categories: 3=bus/coach, 6=train, 4=driving car/van, 0=total.
-    Total (0) includes WFH and not in employment so we sum categories 2–11
-    for the denominator of active commuters."""
+    Categories: 3=train, 4=bus/coach, 7=driving car/van, 0=total employed."""
     print("  Fetching travel to work (TS061) ...")
-    # Train (code 6)
-    rows_train = _fetch_csv_paginated("NM_2074_1", geo_type,
-                                      "C2021_TTWMETH_12=6")
-    # Bus/coach (code 3)
-    rows_bus = _fetch_csv_paginated("NM_2074_1", geo_type,
-                                    "C2021_TTWMETH_12=3")
-    # Driving a car/van (code 4)
-    rows_drive = _fetch_csv_paginated("NM_2074_1", geo_type,
-                                      "C2021_TTWMETH_12=4")
-    # Total (code 0): all people aged 16+ in employment or unemployed
-    rows_total = _fetch_csv_paginated("NM_2074_1", geo_type,
+    rows_train = _fetch_csv_paginated(DATASET_TRAVEL_TO_WORK, geo_type,
+                                      "C2021_TTWMETH_12=3")
+    rows_bus = _fetch_csv_paginated(DATASET_TRAVEL_TO_WORK, geo_type,
+                                    "C2021_TTWMETH_12=4")
+    rows_drive = _fetch_csv_paginated(DATASET_TRAVEL_TO_WORK, geo_type,
+                                      "C2021_TTWMETH_12=7")
+    rows_total = _fetch_csv_paginated(DATASET_TRAVEL_TO_WORK, geo_type,
                                       "C2021_TTWMETH_12=0")
 
     train = _rows_to_single(rows_train)
@@ -230,13 +239,13 @@ def fetch_travel_to_work(geo_type: str) -> dict[str, dict[str, int]]:
 def fetch_economic_activity(geo_type: str) -> dict[str, dict[str, int]]:
     """TS066: economic activity status.
     Returns {code: {econ_active, econ_total}}.
-    Category 0 = total 16+, Category 1 = economically active total."""
+    Category 0 = total 16+, Categories 1–14 = economically active."""
     print("  Fetching economic activity (TS066) ...")
-    rows_active = _fetch_csv_paginated("NM_2075_1", geo_type,
-                                       "C2021_EASTAT_6=1")
-    rows_total = _fetch_csv_paginated("NM_2075_1", geo_type,
-                                      "C2021_EASTAT_6=0")
-    active = _rows_to_single(rows_active)
+    rows_active = _fetch_csv_paginated(DATASET_ECONOMIC_ACTIVITY, geo_type,
+                                       "C2021_EASTAT_20=1,2,3,4,5,6,7,8,9,10,11,12,13,14")
+    rows_total = _fetch_csv_paginated(DATASET_ECONOMIC_ACTIVITY, geo_type,
+                                      "C2021_EASTAT_20=0")
+    active = _rows_to_summed(rows_active)
     total = _rows_to_single(rows_total)
     out: dict[str, dict[str, int]] = {}
     for code in set(active) | set(total):
@@ -251,30 +260,47 @@ def fetch_economic_activity(geo_type: str) -> dict[str, dict[str, int]]:
 
 def fetch_tenure(geo_type: str) -> dict[str, dict[str, int]]:
     """TS054: housing tenure — renters (social + private).
-    Category 4 = social rented, Category 5 = private rented.
+    Categories 4–7 cover social and private renting.
     We also re-use 'households' from TS045 as the denominator."""
     print("  Fetching housing tenure / renters (TS054) ...")
-    rows_social = _fetch_csv_paginated("NM_2063_1", geo_type,
-                                       "C2021_TENURE_9=4")
-    rows_private = _fetch_csv_paginated("NM_2063_1", geo_type,
-                                        "C2021_TENURE_9=5")
-    social = _rows_to_single(rows_social)
-    private = _rows_to_single(rows_private)
+    rows_social_council = _fetch_csv_paginated(DATASET_TENURE, geo_type,
+                                               "C2021_TENURE_9=4")
+    rows_social_other = _fetch_csv_paginated(DATASET_TENURE, geo_type,
+                                             "C2021_TENURE_9=5")
+    rows_private_landlord = _fetch_csv_paginated(DATASET_TENURE, geo_type,
+                                                 "C2021_TENURE_9=6")
+    rows_private_other = _fetch_csv_paginated(DATASET_TENURE, geo_type,
+                                              "C2021_TENURE_9=7")
+    social_council = _rows_to_single(rows_social_council)
+    social_other = _rows_to_single(rows_social_other)
+    private_landlord = _rows_to_single(rows_private_landlord)
+    private_other = _rows_to_single(rows_private_other)
     out: dict[str, dict[str, int]] = {}
-    for code in set(social) | set(private):
+    all_codes = (
+        set(social_council)
+        | set(social_other)
+        | set(private_landlord)
+        | set(private_other)
+    )
+    for code in all_codes:
         out[code] = {
-            "renters": social.get(code, 0) + private.get(code, 0),
+            "renters": (
+                social_council.get(code, 0)
+                + social_other.get(code, 0)
+                + private_landlord.get(code, 0)
+                + private_other.get(code, 0)
+            ),
         }
     return out
 
 
 def fetch_disability(geo_type: str) -> dict[str, int]:
     """TS038: disability (activity-limited a lot + a little).
-    Category 2 = limited a lot, Category 3 = limited a little.
+    Category 1 = limited a lot, Category 2 = limited a little.
     We sum both to get total with some activity limitation."""
     print("  Fetching disability (TS038) ...")
-    rows = _fetch_csv_paginated("NM_2059_1", geo_type,
-                                "C2021_DISABILITY_4=2,3")
+    rows = _fetch_csv_paginated(DATASET_DISABILITY, geo_type,
+                                "C2021_DISABILITY_5=1,2")
     return _rows_to_summed(rows)
 
 
