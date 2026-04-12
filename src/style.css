@@ -198,6 +198,7 @@ body.panel-resizing * {
   display: flex;
   align-items: center;
   gap: 8px;
+  z-index: 15;
 }
 
 #title-card {
@@ -580,7 +581,7 @@ body.panel-resizing * {
 #overlays-panel {
   pointer-events: auto;
   position: absolute;
-  top: 60px;
+  top: 90px;
   left: 16px;
   display: flex;
   flex-direction: column;
@@ -804,6 +805,79 @@ body.panel-resizing * {
 
 .overlay-toggle input:checked ~ .overlay-toggle-track::after {
   transform: translateX(14px);
+}
+
+.overlay-speed-legend {
+  margin-top: 10px;
+  padding: 9px;
+  border-radius: 7px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.overlay-speed-legend-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin-bottom: 6px;
+}
+
+.overlay-speed-gradient {
+  height: 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  background: linear-gradient(90deg,
+    #dc2626 0%,
+    #f59e0b 30%,
+    #22c55e 55%,
+    #06b6d4 75%,
+    #3b82f6 100%
+  );
+}
+
+.overlay-speed-labels {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 2px;
+  font-size: 10px;
+  color: #4b5563;
+}
+
+.overlay-speed-labels span {
+  text-align: center;
+}
+
+.overlay-speed-help {
+  margin-top: 6px;
+  font-size: 10px;
+  color: #5d6474;
+}
+
+#track-speed-legend.hidden {
+  display: none;
+}
+
+#speed-hover-tooltip {
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 45;
+  min-width: 172px;
+  max-width: 260px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  background: rgba(17, 24, 39, 0.92);
+  color: #f5f7fb;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+#speed-hover-tooltip.hidden {
+  display: none;
 }
 
 .overlay-toggle-label {
@@ -1563,6 +1637,52 @@ body.panel-resizing * {
   padding: 7px 12px;
 }
 
+/* Platform selector */
+.sm-platform-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sm-platform-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.03);
+  color: #1a1a2e;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s;
+}
+
+.sm-platform-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.sm-platform-input {
+  width: 48px;
+  padding: 4px 6px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  background: #fff;
+  color: #1a1a2e;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.sm-platform-input::-webkit-inner-spin-button,
+.sm-platform-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 /* ── Line Manager (right-side drawer, stacks to right of Station Manager) ── */
 
 #line-manager {
@@ -1989,6 +2109,38 @@ body.panel-resizing * {
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.01em;
+}
+
+.lm-stop-dwell {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 1px;
+  margin-left: 4px;
+}
+
+.lm-stop-dwell-input {
+  width: 38px;
+  padding: 1px 3px;
+  border: 1px solid rgba(0,0,0,0.15);
+  border-radius: 4px;
+  font-size: 10px;
+  text-align: center;
+  background: rgba(0,0,0,0.03);
+  color: #556;
+  font-variant-numeric: tabular-nums;
+}
+
+.lm-stop-dwell-input:focus {
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+.lm-stop-dwell-label {
+  font-size: 9px;
+  color: #888;
+  font-weight: 600;
 }
 
 .lm-stop-item.is-dragging {
@@ -3052,4 +3204,1459 @@ body.panel-resizing * {
     height: clamp(180px, 30vh, 260px);
   }
 }
+
+/* ── Simulation toolbar ────────────────────────────────────────────────────── */
+
+#sim-toolbar {
+  pointer-events: auto;
+  position: absolute;
+  left: 50%;
+  bottom: 36px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: rgba(26, 26, 46, 0.93);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  z-index: 30;
+}
+
+/* ── Sim time picker ───────────────────────────────────────────────────────── */
+.sim-clock-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sim-clock {
+  cursor: pointer;
+  user-select: none;
+}
+
+.sim-clock:hover {
+  color: #fffcf4;
+  text-decoration: underline;
+}
+
+#sim-time-input {
+  display: none;
+  width: 100px;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 4px;
+  color: #fffcf4;
+  font-family: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  /* Prevent the input from collapsing when time picker opens */
+  min-height: 28px;
+}
+
+#sim-time-input:focus {
+  outline: none;
+  border-color: rgba(52, 199, 89, 0.6);
+}
+
+.sim-btn--realtime {
+  font-size: 11px;
+  padding: 5px 8px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+}
+
+.sim-btn--realtime:hover {
+  background: rgba(52, 199, 89, 0.2);
+  color: #34c759;
+}
+
+.sim-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  height: 36px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: rgba(255, 252, 244, 0.9);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.12s, color 0.12s, transform 0.12s;
+  white-space: nowrap;
+}
+
+.sim-btn--play {
+  background: rgba(255, 255, 255, 0.08);
+  min-width: 78px;
+}
+
+.sim-btn--play:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.sim-btn--play.running {
+  background: rgba(52, 199, 89, 0.2);
+  color: #34c759;
+}
+
+.sim-sep {
+  width: 1px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 0 2px;
+}
+
+.sim-speed-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sim-speed-btn {
+  padding: 5px 10px;
+  height: 28px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(255, 252, 244, 0.55);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  transition: background 0.1s, color 0.1s;
+}
+
+.sim-speed-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 252, 244, 0.85);
+}
+
+.sim-speed-btn.active {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fffcf4;
+}
+
+#sim-btn-speed-key.sim-btn--active {
+  background: rgba(59, 130, 246, 0.22);
+  color: #dbeafe;
+  border-color: rgba(147, 197, 253, 0.45);
+}
+
+#sim-speed-legend {
+  pointer-events: auto;
+  position: absolute;
+  top: 60px;
+  right: 16px;
+  min-width: 240px;
+  z-index: 22;
+  background: rgba(18, 24, 34, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 9px;
+  color: rgba(255, 252, 244, 0.92);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.34);
+}
+
+#sim-speed-legend.hidden {
+  display: none;
+}
+
+.sim-speed-legend-title {
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.sim-speed-gradient {
+  height: 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: linear-gradient(90deg,
+    #dc2626 0%,
+    #f59e0b 30%,
+    #22c55e 55%,
+    #06b6d4 75%,
+    #3b82f6 100%
+  );
+}
+
+.sim-speed-labels {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 2px;
+  font-size: 10px;
+  color: rgba(255, 252, 244, 0.72);
+}
+
+.sim-speed-labels span {
+  text-align: center;
+}
+
+.sim-clock {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: rgba(255, 252, 244, 0.75);
+  letter-spacing: 0.08em;
+  padding: 0 10px 0 6px;
+  min-width: 52px;
+}
+
+/* ── Train detail panel ────────────────────────────────────────────────────── */
+
+#train-detail-panel {
+  pointer-events: auto;
+  position: absolute;
+  bottom: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 320px;
+  background: rgba(255, 252, 244, 0.97);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+  z-index: 21;
+}
+
+#train-detail-panel.hidden { display: none; }
+
+#train-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.04);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+#train-detail-color-bar {
+  width: 4px;
+  height: 34px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+#train-detail-titles {
+  flex: 1;
+  min-width: 0;
+}
+
+#train-detail-line {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a1a2e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#train-detail-stock {
+  font-size: 11px;
+  color: #888;
+  margin-top: 2px;
+}
+
+#train-detail-close {
+  font-size: 18px;
+  line-height: 1;
+  border: none;
+  background: none;
+  color: #999;
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+  transition: color 0.12s;
+}
+
+#train-detail-close:hover { color: #1a1a2e; }
+
+#train-detail-body {
+  padding: 10px 14px 12px;
+}
+
+.td-stat-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.td-stat {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  border-radius: 6px;
+  padding: 7px 10px;
+  text-align: center;
+}
+
+.td-val {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+  color: #1a1a2e;
+  line-height: 1;
+  margin-bottom: 3px;
+}
+
+.td-lbl {
+  display: block;
+  font-size: 10px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+#td-next-station {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 12px;
+  color: #1a1a2e;
+  margin-bottom: 8px;
+}
+
+.td-next-label {
+  font-weight: 600;
+  color: #888;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.td-eta {
+  margin-left: auto;
+  font-size: 11px;
+  color: #888;
+}
+
+/* ── Thameslink-style passenger information display ────────────────────────── */
+#td-carriage-row {
+  margin-top: 8px;
+}
+
+.tlf-screen {
+  background: #080810;
+  border: 3px solid #2a2a30;
+  border-radius: 6px;
+  padding: 10px 12px 8px;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 30px rgba(0, 20, 60, 0.5),
+    inset 0 0 8px rgba(100, 160, 255, 0.05),
+    0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.tlf-scanlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 2px,
+    rgba(0, 0, 0, 0.15) 2px,
+    rgba(0, 0, 0, 0.15) 4px
+  );
+  mix-blend-mode: multiply;
+}
+
+.tlf-train {
+  display: flex;
+  gap: 3px;
+  align-items: flex-end;
+  margin-bottom: 4px;
+  position: relative;
+  z-index: 2;
+}
+
+.tlf-car-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.tlf-car {
+  width: 100%;
+  height: 36px;
+  background: #151520;
+  border: 1.5px solid #3a3a50;
+  border-radius: 2px;
+  position: relative;
+  overflow: hidden;
+}
+
+.tlf-car-front {
+  border-radius: 8px 2px 2px 8px;
+}
+
+.tlf-car-rear {
+  border-radius: 2px 8px 8px 2px;
+}
+
+.tlf-car-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 0%;
+  transition: height 0.5s ease, background 0.5s ease;
+  opacity: 0.75;
+}
+
+.tlf-car-window {
+  position: absolute;
+  top: 25%;
+  left: 12%;
+  right: 12%;
+  height: 20%;
+  background: rgba(80, 120, 200, 0.12);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+/* Door markers */
+.tlf-door {
+  position: absolute;
+  width: 14%;
+  height: 3px;
+  background: #4a4a60;
+  border-radius: 1px;
+  transform: translateX(-50%);
+}
+.tlf-door-top { top: -1px; }
+.tlf-door-bottom { bottom: -1px; }
+
+/* Car number labels */
+.tlf-car-num {
+  font-size: 8px;
+  color: #5a5a70;
+  font-family: 'Courier New', monospace;
+  text-align: center;
+  margin-top: 2px;
+  line-height: 1;
+}
+
+.tlf-legend {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 4px;
+  position: relative;
+  z-index: 2;
+}
+
+.tlf-leg-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 8px;
+  color: #5a5a70;
+  font-family: 'Courier New', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.tlf-leg-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: 0 0 4px currentColor;
+}
+
+.tlf-leg-green .tlf-leg-dot { background: #4ade80; color: #4ade80; }
+.tlf-leg-amber .tlf-leg-dot { background: #f59e0b; color: #f59e0b; }
+.tlf-leg-red .tlf-leg-dot { background: #ef4444; color: #ef4444; }
+
+/* PIS cycling pages */
+.tlf-page {
+  position: relative;
+  z-index: 2;
+}
+
+/* ── Destination page ── */
+.tlf-dest-heading {
+  text-align: center;
+  font-size: 10px;
+  color: #c0c8d8;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+  text-shadow: 0 0 4px rgba(192, 200, 216, 0.3);
+}
+
+.tlf-dest-name {
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffb300;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  text-shadow: 0 0 10px rgba(255, 179, 0, 0.5);
+  padding: 8px 0;
+}
+
+/* ── Loading page header ── */
+.tlf-load-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.tlf-load-next {
+  font-size: 10px;
+  color: #ffb300;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.5px;
+  text-shadow: 0 0 6px rgba(255, 179, 0, 0.3);
+}
+
+.tlf-load-label {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'Courier New', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  text-shadow: 0 0 6px currentColor;
+}
+
+/* ── Calling-at page ── */
+.tlf-call-heading {
+  font-size: 10px;
+  color: #c0c8d8;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  text-shadow: 0 0 4px rgba(192, 200, 216, 0.3);
+}
+
+.tlf-call-list {
+  font-size: 11px;
+  color: #ffb300;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.5px;
+  line-height: 1.6;
+  text-shadow: 0 0 6px rgba(255, 179, 0, 0.3);
+  max-height: 80px;
+  overflow: hidden;
+}
+
+/* ── Passenger count ── */
+.tlf-pax-count {
+  text-align: center;
+  font-size: 9px;
+  color: #6a7080;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.3px;
+  margin-top: 6px;
+  text-transform: uppercase;
+}
+
+/* ── Held at red signal overlay ── */
+.tlf-held-msg {
+  position: relative;
+  z-index: 3;
+  text-align: center;
+  font-size: 11px;
+  color: #ff6b6b;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.5px;
+  line-height: 1.5;
+  padding: 12px 8px;
+  text-shadow: 0 0 8px rgba(255, 107, 107, 0.4);
+  animation: tlf-held-pulse 2s ease-in-out infinite;
+}
+
+@keyframes tlf-held-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ── Held-at-signal page (replaces overlay) ── */
+.tlf-page-held-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 8px;
+  gap: 6px;
+}
+
+.tlf-held-screen-header {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ef4444;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 2px;
+  text-shadow: 0 0 10px rgba(239, 68, 68, 0.6);
+  animation: tlf-held-pulse 1.5s ease-in-out infinite;
+}
+
+.tlf-held-screen-msg {
+  font-size: 11px;
+  color: #ff9999;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.5px;
+  text-align: center;
+}
+
+.tlf-held-screen-sub {
+  font-size: 9px;
+  color: #7a6060;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.3px;
+  text-align: center;
+}
+
+/* ── Calling-at rows with ETA ── */
+.tlf-call-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0 2px;
+}
+
+.tlf-call-name {
+  font-size: 10px;
+  color: #ffb300;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.3px;
+  text-shadow: 0 0 6px rgba(255, 179, 0, 0.3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+
+.tlf-call-eta {
+  font-size: 10px;
+  color: #c0d0ff;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.5px;
+  text-shadow: 0 0 4px rgba(192, 208, 255, 0.3);
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+/* ── PIS page navigation ── */
+.tlf-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 6px;
+  position: relative;
+  z-index: 2;
+}
+
+.tlf-nav-btn {
+  background: none;
+  border: 1px solid #3a3a50;
+  color: #8090a8;
+  font-size: 10px;
+  width: 22px;
+  height: 18px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 1;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.tlf-nav-btn:hover {
+  color: #ffb300;
+  border-color: #ffb300;
+}
+
+.tlf-nav-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #3a3a50;
+  transition: background 0.2s;
+}
+
+.tlf-nav-dot-active {
+  background: #ffb300;
+  box-shadow: 0 0 4px rgba(255, 179, 0, 0.4);
+}
+
+/* ── Departure board (dot-matrix style) ────────────────────────────────────── */
+
+#departure-board {
+  pointer-events: auto;
+  position: absolute;
+  bottom: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 480px;
+  max-width: 580px;
+  background: #111;
+  color: #e87722;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  border: 2px solid #333;
+  border-radius: 4px;
+  padding: 8px 12px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.7);
+  z-index: 21;
+}
+
+#departure-board.hidden { display: none; }
+
+/* When train detail panel is also visible, shift board above it */
+#departure-board.above-panel {
+  bottom: 200px;
+}
+
+#db-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #333;
+}
+
+#db-station-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffa040;
+  letter-spacing: 0.06em;
+}
+
+#db-close {
+  background: none;
+  border: none;
+  color: #e87722;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  opacity: 0.6;
+  transition: opacity 0.1s;
+}
+
+#db-close:hover { opacity: 1; }
+
+#db-mode-toggle {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  margin-right: 8px;
+}
+
+#db-filter-toggle {
+  display: flex;
+  gap: 2px;
+  margin-right: 8px;
+}
+
+.db-mode-btn {
+  background: #1a1a2e;
+  border: 1px solid #3a3a4e;
+  color: #8888aa;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.15s;
+}
+
+.db-mode-btn--active {
+  background: #2a2a4e;
+  color: #ffa040;
+  border-color: #ffa040;
+}
+
+.db-mode-btn:hover:not(.db-mode-btn--active) {
+  color: #bbbbdd;
+  border-color: #5a5a6e;
+}
+
+#db-live-badge {
+  position: absolute;
+  top: 8px;
+  right: 40px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  animation: live-pulse 1.5s ease-in-out infinite;
+}
+
+#db-live-badge.hidden { display: none; }
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+#db-columns {
+  display: grid;
+  grid-template-columns: 52px 1fr 44px 90px;
+  gap: 4px;
+  margin-bottom: 4px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.db-col-hd {
+  font-size: 10px;
+  color: #886644;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+}
+
+#db-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 160px;
+  overflow: hidden;
+}
+
+.db-row {
+  display: grid;
+  grid-template-columns: 52px 1fr 44px 90px;
+  gap: 4px;
+  padding: 3px 0;
+  border-bottom: 1px solid #1c1c1c;
+  color: #e87722;
+  font-size: 13px;
+}
+
+.db-row:last-child { border-bottom: none; }
+
+.db-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  align-self: center;
+}
+
+.db-cell--time { color: #ffa040; font-weight: 700; }
+.db-cell--plat { text-align: center; }
+.db-cell--status { color: #44cc66; }
+.db-cell--status.late { color: #ff6655; }
+.db-cell--status.due  { color: #ffa040; font-weight: 700; }
+
+@keyframes db-flip {
+  0%   { opacity: 0.3; transform: scaleY(0.6); }
+  100% { opacity: 1;   transform: scaleY(1); }
+}
+
+.db-row--updating { animation: db-flip 0.12s ease-out; }
+
+/* ── Mode toggle ───────────────────────────────────────────────────────────── */
+
+#mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 10px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.mode-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  height: 28px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #687186;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.mode-btn:hover { background: rgba(0, 0, 0, 0.04); color: #1a1a2e; }
+
+.mode-btn--active {
+  background: #fffcf4;
+  color: #1a1a2e;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* When in sim mode, apply a subtle dark tint to the whole UI for a game feel */
+body.sim-mode #ui { color-scheme: dark; }
+
+body.sim-mode #title-card {
+  background: rgba(26, 26, 46, 0.92);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+body.sim-mode #title-text { color: rgba(255, 252, 244, 0.9); }
+body.sim-mode #mode-toggle { background: rgba(255, 255, 255, 0.08); }
+body.sim-mode .mode-btn { color: rgba(255, 252, 244, 0.55); }
+body.sim-mode .mode-btn:hover { background: rgba(255, 255, 255, 0.1); color: rgba(255, 252, 244, 0.85); }
+body.sim-mode .mode-btn--active { background: rgba(255, 255, 255, 0.15); color: #fffcf4; box-shadow: none; }
+
+body.sim-mode #history-controls {
+  background: rgba(26, 26, 46, 0.92);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+body.sim-mode .history-btn { color: rgba(255, 252, 244, 0.7); }
+body.sim-mode .history-btn:hover { background: rgba(255, 255, 255, 0.1); color: #fffcf4; }
+
+/* Hide plan-only or sim-only elements based on mode */
+body:not(.sim-mode) #sim-toolbar { display: none !important; }
+body:not(.sim-mode) #sim-hud { display: none !important; }
+body:not(.sim-mode) #train-detail-panel { display: none !important; }
+body:not(.sim-mode) #departure-board { display: none !important; }
+body:not(.sim-mode) #signal-detail-panel { display: none !important; }
+body:not(.sim-mode) #timetable-modal { display: none !important; }
+
+body.sim-mode #network-toolbar { display: none !important; }
+body.sim-mode #line-panel { display: none !important; }
+body.sim-mode #overlays-panel { display: none !important; }
+body.sim-mode #station-manager { display: none !important; }
+body.sim-mode #line-manager { display: none !important; }
+body.sim-mode #view-toggle { display: none !important; }
+
+/* Sim toolbar starts hidden, shown by mode switch */
+#sim-toolbar.hidden { display: none; }
+
+/* ── Sim HUD (Transport Fever / Cities Skylines style stats) ──────────── */
+
+#sim-hud {
+  pointer-events: auto;
+  position: absolute;
+  top: 14px;
+  right: 60px;
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  background: rgba(26, 26, 46, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  z-index: 30;
+}
+
+#sim-hud.hidden { display: none; }
+
+.sim-hud-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  min-width: 64px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.sim-hud-stat + .sim-hud-stat {
+  border-left: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.sim-hud-val {
+  font-size: 16px;
+  font-weight: 700;
+  color: #fffcf4;
+  line-height: 1;
+  margin-bottom: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sim-hud-lbl {
+  font-size: 9.5px;
+  color: rgba(255, 252, 244, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.sim-hud-sep {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.15);
+  margin: 4px 0;
+}
+
+.sim-hud-val--revenue {
+  color: #22c55e;
+}
+
+.sim-hud-val--satisfaction {
+  transition: color 0.3s;
+}
+
+.sim-hud-val--ontime {
+  transition: color 0.3s;
+}
+
+/* ── Signal detail panel ───────────────────────────────────────────────────── */
+
+#signal-detail-panel {
+  pointer-events: auto;
+  position: absolute;
+  bottom: 96px;
+  right: 16px;
+  width: 260px;
+  background: rgba(26, 26, 46, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  z-index: 21;
+  color: rgba(255, 252, 244, 0.9);
+}
+
+#signal-detail-panel.hidden { display: none; }
+
+#signal-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+#signal-detail-icon {
+  width: 20px;
+  height: 44px;
+  flex-shrink: 0;
+}
+
+#signal-detail-titles { flex: 1; min-width: 0; }
+
+#signal-detail-aspect {
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+#signal-detail-line {
+  font-size: 11px;
+  color: rgba(255, 252, 244, 0.5);
+  margin-top: 2px;
+}
+
+#signal-detail-close {
+  font-size: 18px;
+  line-height: 1;
+  border: none;
+  background: none;
+  color: rgba(255, 252, 244, 0.5);
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+  transition: color 0.12s;
+}
+#signal-detail-close:hover { color: #fffcf4; }
+
+#signal-detail-body { padding: 10px 14px 12px; }
+
+.draggable-panel-handle {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.draggable-panel-handle button,
+.draggable-panel-handle input,
+.draggable-panel-handle select,
+.draggable-panel-handle textarea,
+.draggable-panel-handle a,
+.draggable-panel-handle label {
+  user-select: auto;
+}
+
+.is-being-dragged {
+  cursor: grabbing;
+}
+
+.is-being-dragged .draggable-panel-handle {
+  cursor: grabbing;
+}
+
+.sd-stat-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.sd-stat {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 7px 10px;
+  text-align: center;
+}
+
+.sd-val {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fffcf4;
+  line-height: 1;
+  margin-bottom: 3px;
+}
+
+.sd-lbl {
+  display: block;
+  font-size: 10px;
+  color: rgba(255, 252, 244, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.sd-adj-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 252, 244, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+#sd-adj-list {
+  font-size: 12px;
+  color: rgba(255, 252, 244, 0.8);
+  margin-left: 4px;
+}
+
+/* ── Train detail panel (sim mode dark) ──────────────────────────────────── */
+
+body.sim-mode #train-detail-panel {
+  background: rgba(26, 26, 46, 0.95);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+body.sim-mode #train-detail-header {
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+body.sim-mode #train-detail-line { color: #fffcf4; }
+body.sim-mode #train-detail-stock { color: rgba(255, 252, 244, 0.5); }
+body.sim-mode #train-detail-close { color: rgba(255, 252, 244, 0.5); }
+body.sim-mode #train-detail-close:hover { color: #fffcf4; }
+body.sim-mode .td-val { color: #fffcf4; }
+body.sim-mode .td-lbl { color: rgba(255, 252, 244, 0.45); }
+body.sim-mode .td-stat {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+body.sim-mode #td-next-station { color: rgba(255, 252, 244, 0.85); }
+body.sim-mode .td-next-label { color: rgba(255, 252, 244, 0.5); }
+body.sim-mode .td-eta { color: rgba(255, 252, 244, 0.5); }
+
+.td-headcode {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: #888;
+  letter-spacing: 0.08em;
+  margin-top: 2px;
+}
+body.sim-mode .td-headcode { color: rgba(255, 252, 244, 0.6); }
+
+#train-detail-service {
+  padding: 4px 12px 0;
+  font-size: 11px;
+  color: #687186;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body.sim-mode #train-detail-service { color: rgba(255, 252, 244, 0.45); }
+
+.td-follow-btn {
+  padding: 4px 10px;
+  height: 24px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  background: transparent;
+  color: #687186;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  flex-shrink: 0;
+}
+.td-follow-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #1a1a2e;
+}
+.td-follow-btn.following {
+  background: rgba(52, 199, 89, 0.15);
+  color: #34c759;
+  border-color: rgba(52, 199, 89, 0.3);
+}
+body.sim-mode .td-follow-btn {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 252, 244, 0.55);
+}
+body.sim-mode .td-follow-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fffcf4;
+}
+body.sim-mode .td-follow-btn.following {
+  background: rgba(52, 199, 89, 0.2);
+  color: #34c759;
+  border-color: rgba(52, 199, 89, 0.3);
+}
+
+/* ── Timetable designer modal ──────────────────────────────────────────────── */
+
+#timetable-modal {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+#timetable-modal.hidden { display: none; }
+
+.timetable-box {
+  background: rgba(26, 26, 46, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
+  width: 720px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: rgba(255, 252, 244, 0.9);
+}
+
+.timetable-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.timetable-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.timetable-close-btn {
+  font-size: 20px;
+  line-height: 1;
+  border: none;
+  background: none;
+  color: rgba(255, 252, 244, 0.5);
+  cursor: pointer;
+  padding: 0 4px;
+  transition: color 0.12s;
+}
+.timetable-close-btn:hover { color: #fffcf4; }
+
+#timetable-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  overflow-x: auto;
+}
+
+.tt-tab {
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 252, 244, 0.5);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.12s, border-color 0.12s;
+  white-space: nowrap;
+}
+.tt-tab:hover { color: rgba(255, 252, 244, 0.8); }
+.tt-tab.active {
+  color: #fffcf4;
+  border-bottom-color: #fffcf4;
+}
+
+#timetable-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 18px;
+}
+
+#timetable-controls {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.tt-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tt-control-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 252, 244, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.tt-input {
+  padding: 5px 8px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fffcf4;
+  font-family: inherit;
+  font-size: 12px;
+  width: 100px;
+}
+
+.tt-input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+#timetable-demand-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+}
+
+.tt-demand-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 252, 244, 0.5);
+  white-space: nowrap;
+}
+
+#tt-demand-indicator {
+  flex: 1;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+#tt-demand-indicator::after {
+  content: '';
+  display: block;
+  height: 100%;
+  width: var(--demand-pct, 50%);
+  background: linear-gradient(90deg, #22c55e, #f59e0b, #ef4444);
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+#timetable-table-wrap {
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+}
+
+#timetable-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+#timetable-table th {
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 252, 244, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+}
+
+#timetable-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: rgba(255, 252, 244, 0.8);
+  white-space: nowrap;
+}
+
+#timetable-table tr:hover td {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.tt-headcode {
+  font-family: 'Courier New', Courier, monospace;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.tt-load-bar {
+  display: inline-block;
+  width: 40px;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.tt-load-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s;
+}
+
+.tt-load-green { background: #22c55e; }
+.tt-load-amber { background: #f59e0b; }
+.tt-load-red   { background: #ef4444; }
+
 

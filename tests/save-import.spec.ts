@@ -10,7 +10,10 @@ const BASE = 'http://localhost:5174';
 
 async function waitForMap(page: import('@playwright/test').Page) {
   await page.waitForFunction(
-    () => (window as unknown as Record<string, unknown>)['__mapState'] === 'loaded',
+    () => {
+      const w = window as unknown as Record<string, unknown>;
+      return !!w['__map'] && !!w['__networkEditor'];
+    },
     { timeout: 20_000 },
   );
 }
@@ -32,6 +35,7 @@ async function getLineCount(page: import('@playwright/test').Page): Promise<numb
 /** Seed the map with one station and one line so there is data to export. */
 async function seedNetwork(page: import('@playwright/test').Page) {
   await page.locator('#tool-line').click();
+  await expect(page.locator('#line-panel')).toBeVisible({ timeout: 10_000 });
   await page.locator('#new-line-name').fill('Test Line');
   await page.locator('#new-line-add').click();
 
@@ -40,7 +44,7 @@ async function seedNetwork(page: import('@playwright/test').Page) {
   const cy = canvas!.y + canvas!.height / 2;
   await page.mouse.click(cx - 50, cy);
   await page.mouse.click(cx + 50, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 }
 
 /** Build a minimal valid NetworkExport JSON buffer. */
@@ -217,7 +221,7 @@ test('importing a valid file onto an empty map loads the network directly', asyn
     mimeType: 'application/json',
     buffer: buildExportJson(2, 'Direct Import'),
   });
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   expect(await getStationCount(page)).toBe(2);
   expect(await getLineCount(page)).toBe(1);
@@ -232,7 +236,7 @@ test('importing onto an empty map does not show the conflict modal', async ({ pa
     mimeType: 'application/json',
     buffer: buildExportJson(1),
   });
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await expect(page.locator('#import-modal')).toHaveClass(/hidden/);
 });
@@ -246,7 +250,7 @@ test('imported stations have correct names and coordinates', async ({ page }) =>
     mimeType: 'application/json',
     buffer: buildExportJson(1, 'Coastal'),
   });
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   const station = await page.evaluate(() =>
     ((window as unknown as { __networkEditor: { network: { stations: Array<{ name: string; lng: number; lat: number }> } } })
@@ -266,7 +270,7 @@ test('imported line has correct name and colour', async ({ page }) => {
     mimeType: 'application/json',
     buffer: buildExportJson(1, 'Riverside'),
   });
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   const line = await page.evaluate(() =>
     ((window as unknown as { __networkEditor: { network: { lines: Array<{ name: string; color: string }> } } })
@@ -289,7 +293,7 @@ test('importing onto an existing network shows the conflict modal', async ({ pag
     mimeType: 'application/json',
     buffer: buildExportJson(1, 'New Line'),
   });
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await expect(page.locator('#import-modal')).not.toHaveClass(/hidden/);
 });
@@ -304,7 +308,7 @@ test('conflict modal has Replace all, Add on top, and Cancel buttons', async ({ 
     mimeType: 'application/json',
     buffer: buildExportJson(1),
   });
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await expect(page.locator('#import-btn-replace')).toBeVisible();
   await expect(page.locator('#import-btn-merge')).toBeVisible();
@@ -327,7 +331,7 @@ test('Replace all replaces existing network with imported data', async ({ page }
   await expect(page.locator('#import-modal')).not.toHaveClass(/hidden/);
 
   await page.locator('#import-btn-replace').click();
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   expect(await getStationCount(page)).toBe(3);
   expect(await getLineCount(page)).toBe(1);
@@ -352,7 +356,7 @@ test('Replace all closes the conflict modal', async ({ page }) => {
   await expect(page.locator('#import-modal')).not.toHaveClass(/hidden/);
 
   await page.locator('#import-btn-replace').click();
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(50);
 
   await expect(page.locator('#import-modal')).toHaveClass(/hidden/);
 });
@@ -373,7 +377,7 @@ test('Add on top merges imported data with existing network', async ({ page }) =
   await expect(page.locator('#import-modal')).not.toHaveClass(/hidden/);
 
   await page.locator('#import-btn-merge').click();
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   // Original 2 + imported 2 = 4 stations; original 1 + imported 1 = 2 lines
   expect(await getStationCount(page)).toBe(4);
@@ -393,7 +397,7 @@ test('Add on top closes the conflict modal', async ({ page }) => {
   await expect(page.locator('#import-modal')).not.toHaveClass(/hidden/);
 
   await page.locator('#import-btn-merge').click();
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(50);
 
   await expect(page.locator('#import-modal')).toHaveClass(/hidden/);
 });
@@ -417,7 +421,7 @@ test('merged stations get new IDs so they do not collide with existing stations'
   await expect(page.locator('#import-modal')).not.toHaveClass(/hidden/);
 
   await page.locator('#import-btn-merge').click();
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   const ids = await page.evaluate(() =>
     ((window as unknown as { __networkEditor: { network: { stations: Array<{ id: string }> } } })
@@ -448,7 +452,7 @@ test('Cancel button closes the modal without changing the network', async ({ pag
   await expect(page.locator('#import-modal')).not.toHaveClass(/hidden/);
 
   await page.locator('#import-btn-cancel').click();
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(50);
 
   await expect(page.locator('#import-modal')).toHaveClass(/hidden/);
   expect(await getStationCount(page)).toBe(stationsBefore);
@@ -471,7 +475,7 @@ test('clicking the modal backdrop cancels the import', async ({ page }) => {
 
   // Click the backdrop (outside the modal box)
   await page.locator('#import-modal').click({ position: { x: 5, y: 5 } });
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(50);
 
   await expect(page.locator('#import-modal')).toHaveClass(/hidden/);
   expect(await getStationCount(page)).toBe(stationsBefore);
@@ -494,7 +498,7 @@ test('importing invalid JSON shows an alert and does not change the network', as
     mimeType: 'application/json',
     buffer: Buffer.from('this is not json {{{'),
   });
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   expect(alertMessage).toMatch(/not valid JSON/i);
   expect(await getStationCount(page)).toBe(0);
@@ -521,7 +525,7 @@ test('importing a JSON file with wrong appId shows an alert', async ({ page }) =
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(wrongApp)),
   });
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   expect(alertMessage).toMatch(/High Speed Too/i);
   expect(await getStationCount(page)).toBe(0);
@@ -544,7 +548,7 @@ test('importing a JSON file missing network property shows an alert', async ({ p
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(bad)),
   });
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   expect(alertMessage).toMatch(/High Speed Too/i);
 });
@@ -573,7 +577,7 @@ test('importing a file with a station missing lng does not load and shows alert'
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(badStation)),
   });
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   expect(alertMessage).toMatch(/High Speed Too/i);
   expect(await getStationCount(page)).toBe(0);
@@ -607,7 +611,7 @@ test('exported network can be re-imported and produces identical station/line da
   // Clear the network, then re-import
   page.on('dialog', (d) => d.accept());
   await page.locator('#tool-clear').click();
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
   expect(await getStationCount(page)).toBe(0);
 
   await page.locator('#import-file-input').setInputFiles({
@@ -615,7 +619,7 @@ test('exported network can be re-imported and produces identical station/line da
     mimeType: 'application/json',
     buffer: fileBuffer,
   });
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   const reimportedData = await page.evaluate(() => {
     const n = (window as unknown as { __networkEditor: { network: { stations: Array<{ name: string; lng: number; lat: number }>; lines: Array<{ name: string; color: string; stationIds: string[] }> } } })
