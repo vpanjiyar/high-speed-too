@@ -12,6 +12,10 @@ export interface Station {
   lat: number;
   /** NaPTAN ATCO code, set when the station was imported from the NaPTAN layer. */
   atco?: string;
+  /** CRS / TIPLOC code for live departure lookups (derived from ATCO for RLY stations). */
+  crs?: string;
+  /** Number of platforms at this station (default 2). */
+  platforms?: number;
 }
 
 export interface Line {
@@ -27,6 +31,8 @@ export interface Line {
   rollingStockId?: string;
   /** Number of train units assigned to this line. */
   trainCount?: number;
+  /** Per-station dwell time overrides in seconds (stationId → seconds). */
+  stationDwellTimes?: Record<string, number>;
 }
 
 export interface NetworkData {
@@ -189,13 +195,14 @@ export class Network {
     return rebuilt.some((path) => path !== null) ? rebuilt : undefined;
   }
 
-  addStation(lng: number, lat: number, name?: string, atco?: string): Station {
+  addStation(lng: number, lat: number, name?: string, atco?: string, crs?: string): Station {
     const station: Station = {
       id: generateId('stn'),
       name: name ?? `Station ${this.stations.length + 1}`,
       lng,
       lat,
       ...(atco ? { atco } : {}),
+      ...(crs ? { crs } : {}),
     };
     this.stations.push(station);
     this._emit();
@@ -223,6 +230,14 @@ export class Network {
     const s = this.stations.find((s) => s.id === id);
     if (s) {
       s.name = name;
+      this._emit();
+    }
+  }
+
+  setStationPlatforms(id: string, platforms: number): void {
+    const s = this.stations.find((s) => s.id === id);
+    if (s) {
+      s.platforms = Math.max(1, Math.min(20, Math.round(platforms)));
       this._emit();
     }
   }

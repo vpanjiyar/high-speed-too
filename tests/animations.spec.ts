@@ -4,7 +4,10 @@ const BASE = 'http://localhost:5174';
 
 async function waitForMap(page: import('@playwright/test').Page) {
   await page.waitForFunction(
-    () => (window as unknown as Record<string, unknown>)['__mapState'] === 'loaded',
+    () => {
+      const w = window as unknown as Record<string, unknown>;
+      return !!w['__map'] && !!w['__networkEditor'];
+    },
     { timeout: 20_000 },
   );
 }
@@ -90,6 +93,7 @@ async function seedLongNamedLine(page: import('@playwright/test').Page) {
 
 async function seedLine(page: import('@playwright/test').Page, lineName = 'Animated Line') {
   await page.locator('#tool-line').click();
+  await expect(page.locator('#line-panel')).toBeVisible({ timeout: 10_000 });
   await page.locator('#new-line-name').fill(lineName);
   await page.locator('#new-line-add').click();
 
@@ -100,7 +104,7 @@ async function seedLine(page: import('@playwright/test').Page, lineName = 'Anima
 
   await page.mouse.click(cx - 60, cy);
   await page.mouse.click(cx + 60, cy);
-  await page.waitForTimeout(250);
+  await expect(page.locator('#line-manager')).toBeVisible({ timeout: 10_000 });
 }
 
 function buildImportJson(): Buffer {
@@ -146,7 +150,7 @@ test('station manager drawer open and close are animated', async ({ page }) => {
   const canvas = await page.locator('#map canvas').boundingBox();
   expect(canvas).not.toBeNull();
   await page.mouse.click(canvas!.x + canvas!.width / 2, canvas!.y + canvas!.height / 2);
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(50);
 
   await page.evaluate(() => {
     const editor = (window as unknown as {

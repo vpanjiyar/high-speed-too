@@ -289,6 +289,35 @@ export function mapStyle(tilesUrl: string): StyleSpecification {
         'line-opacity': 0.7,
       },
     },
+    // Heavy rail speed limit overlay from OSM maxspeed (km/h).
+    {
+      id: 'rail-speed-limit-overlay',
+      type: 'line',
+      source: 'rail-network',
+      filter: ['all',
+        ['==', ['get', 'railway'], 'rail'],
+        ['>', ['to-number', ['get', 'maxspeed'], 0], 0],
+      ],
+      minzoom: 5,
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': [
+          'interpolate', ['linear'], ['to-number', ['get', 'maxspeed'], 0],
+          0,   '#6b7280',
+          40,  '#dc2626',
+          80,  '#f59e0b',
+          120, '#22c55e',
+          160, '#06b6d4',
+          220, '#3b82f6',
+        ],
+        'line-width': ['interpolate', ['linear'], ['zoom'],
+          5, 0.8, 8, 1.6, 12, 3, 16, 5,
+        ],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'],
+          5, 0.5, 10, 0.75, 16, 0.95,
+        ],
+      },
+    },
     // City metro / subway / elevated light rail — casing
     {
       id: 'rail-light-casing',
@@ -557,12 +586,12 @@ export function mapStyle(tilesUrl: string): StyleSpecification {
         'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, 0.5, 10, 1.5, 14, 2],
       },
     },
-    // Metro / LRT / underground stations (MET)
+    // Metro / LRT / underground / tram stations (MET + TMU)
     {
       id: 'naptan-station-metro',
       type: 'circle',
       source: 'naptan',
-      filter: ['==', ['get', 'stopType'], 'MET'],
+      filter: ['in', ['get', 'stopType'], ['literal', ['MET', 'TMU']]],
       minzoom: 7,
       paint: {
         'circle-color': C.stationMetro,
@@ -594,12 +623,12 @@ export function mapStyle(tilesUrl: string): StyleSpecification {
         'text-halo-width': 2,
       },
     },
-    // Metro / LRT station labels
+    // Metro / LRT / tram station labels
     {
       id: 'naptan-label-metro',
       type: 'symbol',
       source: 'naptan',
-      filter: ['==', ['get', 'stopType'], 'MET'],
+      filter: ['in', ['get', 'stopType'], ['literal', ['MET', 'TMU']]],
       minzoom: 10,
       layout: {
         'text-field': ['get', 'name'],

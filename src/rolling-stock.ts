@@ -31,6 +31,9 @@ export interface RollingStock {
   costMillionGbp: number;
   /** Electric system (e.g. "25 kV AC overhead") */
   electricSystem: string;
+  /** True if this stock operates on 750V DC third-rail infrastructure.
+   *  UK third-rail lines have a Network Rail infrastructure cap of ~100 mph (161 km/h). */
+  thirdRail?: boolean;
   /** A fun fact or description */
   funFact: string;
 }
@@ -71,6 +74,7 @@ export const ROLLING_STOCK: RollingStock[] = [
     totalCapacity: 1754,
     costMillionGbp: 14,
     electricSystem: '25 kV AC / 750 V DC dual',
+    thirdRail: true,
     funFact: 'The Class 700 Desiro City fleet is the backbone of the Thameslink core through central London, running through a tunnel originally built in 1868.',
   },
   {
@@ -201,6 +205,7 @@ export const ROLLING_STOCK: RollingStock[] = [
     totalCapacity: 438,
     costMillionGbp: 8.6,
     electricSystem: '25 kV AC / 750 V DC dual',
+    thirdRail: true,
     funFact: 'Based on the Shinkansen 400 Series, the Javelin was the first Japanese-built train sold in Europe and served as the official Olympic shuttle during London 2012.',
   },
 
@@ -387,6 +392,46 @@ function appendJourneySegment(
   if (segment.endTimeSec <= segment.startTimeSec) return;
 
   segments.push(segment);
+
+  // Add intermediate sample points for smooth speed profile curves.
+  // Subdivide non-dwell segments for higher resolution in the chart.
+  const duration = segment.endTimeSec - segment.startTimeSec;
+  const speedDelta = Math.abs(segment.endSpeedKmh - segment.startSpeedKmh);
+  const distDelta = segment.endDistanceKm - segment.startDistanceKm;
+
+  // More sub-samples for long or speed-changing segments
+  let subSamples = 1; // minimum: just the endpoint
+  if (segment.phase !== 'dwell') {
+    if (speedDelta > 5 || duration > 30) subSamples = Math.min(8, Math.max(3, Math.ceil(duration / 15)));
+  }
+
+  if (subSamples > 1) {
+    for (let s = 1; s < subSamples; s++) {
+      const t = s / subSamples;
+      // For acceleration: v = v0 + (v1-v0)*t, d = d0 + (v0*t + 0.5*(v1-v0)*t²) * ratio
+      // Simplified: linear interpolation of speed, quadratic interpolation of distance for accel/brake
+      let speedKmh: number;
+      let distanceKm: number;
+      if (segment.phase === 'accelerating') {
+        speedKmh = segment.startSpeedKmh + (segment.endSpeedKmh - segment.startSpeedKmh) * t;
+        // distance under constant acceleration: d = v0*t + 0.5*a*t² → fraction = t² adjusted
+        distanceKm = segment.startDistanceKm + distDelta * (2 * t - t * t);
+      } else if (segment.phase === 'braking') {
+        speedKmh = segment.startSpeedKmh + (segment.endSpeedKmh - segment.startSpeedKmh) * t;
+        distanceKm = segment.startDistanceKm + distDelta * (t * t);
+      } else {
+        // cruising: linear
+        speedKmh = segment.startSpeedKmh;
+        distanceKm = segment.startDistanceKm + distDelta * t;
+      }
+      points.push({
+        timeSec: segment.startTimeSec + duration * t,
+        speedKmh: Math.max(0, speedKmh),
+        distanceKm,
+      });
+    }
+  }
+
   points.push({
     timeSec: segment.endTimeSec,
     speedKmh: segment.endSpeedKmh,
@@ -400,11 +445,14 @@ function appendJourneySegment(
  * @param stations – ordered array of {lng, lat, name?} for each stop on the line
  * @param stock – the rolling stock assigned to the line
  * @param unitCount – number of train units operating on the line
+ * @param legSpeedLimitsKmh – optional per-leg speed limit (one per leg, i.e. stations.length - 1).
+ *        When provided, the cruise speed for each leg is capped to this limit.
  */
 export function computeLineStats(
   stations: { lng: number; lat: number; name?: string }[],
   stock: RollingStock,
   unitCount: number,
+  legSpeedLimitsKmh?: number[],
 ): LineTrainStats {
   const legDistances: number[] = [];
   for (let i = 1; i < stations.length; i++) {
@@ -417,8 +465,10 @@ export function computeLineStats(
 
   const totalDistanceKm = legDistances.reduce((a, b) => a + b, 0);
 
-  const maxSpeedMs = stock.maxSpeedKmh / 3.6;
   const accelMs2 = Math.max(0.1, stock.accelerationMs2);
+  // Service braking is typically gentler than acceleration — cap at 0.7 m/s²
+  // for a comfortable passenger deceleration rate.
+  const brakeMs2 = Math.min(accelMs2, 0.7);
 
   const legTimesMin: number[] = [];
   const profilePoints: JourneyProfilePoint[] = [{ timeSec: 0, speedKmh: 0, distanceKm: 0 }];
@@ -445,18 +495,36 @@ export function computeLineStats(
     const fromStationName = stations[legIndex]?.name ?? `Stop ${legIndex + 1}`;
     const toStationName = stations[legIndex + 1]?.name ?? `Stop ${legIndex + 2}`;
 
-    const distanceNeededForTopSpeedM = (maxSpeedMs * maxSpeedMs) / accelMs2;
-    const peakSpeedMs = legDistanceM >= distanceNeededForTopSpeedM
-      ? maxSpeedMs
-      : Math.sqrt(legDistanceM * accelMs2);
-    const accelTimeSec = peakSpeedMs / accelMs2;
-    const cruiseDistanceM = Math.max(0, legDistanceM - distanceNeededForTopSpeedM);
-    const cruiseTimeSec = peakSpeedMs > 0 ? cruiseDistanceM / peakSpeedMs : 0;
-    const brakeTimeSec = peakSpeedMs / accelMs2;
+    // Effective max speed for this leg: stock limit capped by track speed limit
+    const legLimitKmh = legSpeedLimitsKmh?.[legIndex];
+    const effectiveMaxKmh = legLimitKmh != null && legLimitKmh > 0
+      ? Math.min(stock.maxSpeedKmh, legLimitKmh) : stock.maxSpeedKmh;
+    const effectiveMaxMs = effectiveMaxKmh / 3.6;
 
-    const accelDistanceKm = ((peakSpeedMs * peakSpeedMs) / (2 * accelMs2)) / 1000;
+    // Accel distance = v²/(2a), brake distance = v²/(2b)
+    const accelDistForTopM = (effectiveMaxMs * effectiveMaxMs) / (2 * accelMs2);
+    const brakeDistForTopM = (effectiveMaxMs * effectiveMaxMs) / (2 * brakeMs2);
+    const distNeededM = accelDistForTopM + brakeDistForTopM;
+
+    let peakSpeedMs: number;
+    if (legDistanceM >= distNeededM) {
+      peakSpeedMs = effectiveMaxMs;
+    } else {
+      // Can't reach top speed — find peak from: d = v²/(2a) + v²/(2b)
+      // v = sqrt(2*d*a*b/(a+b))
+      peakSpeedMs = Math.sqrt((2 * legDistanceM * accelMs2 * brakeMs2) / (accelMs2 + brakeMs2));
+    }
+
+    const accelTimeSec = peakSpeedMs / accelMs2;
+    const brakeTimeSec = peakSpeedMs / brakeMs2;
+    const accelDistM = (peakSpeedMs * peakSpeedMs) / (2 * accelMs2);
+    const brakeDistM = (peakSpeedMs * peakSpeedMs) / (2 * brakeMs2);
+    const cruiseDistanceM = Math.max(0, legDistanceM - accelDistM - brakeDistM);
+    const cruiseTimeSec = peakSpeedMs > 0 ? cruiseDistanceM / peakSpeedMs : 0;
+
+    const accelDistanceKm = accelDistM / 1000;
     const cruiseDistanceKm = cruiseDistanceM / 1000;
-    const brakeDistanceKm = Math.max(0, legDistanceKm - accelDistanceKm - cruiseDistanceKm);
+    const brakeDistanceKm = brakeDistM / 1000;
     const peakSpeedKmh = peakSpeedMs * 3.6;
 
     maxReachedSpeedKmh = Math.max(maxReachedSpeedKmh, peakSpeedKmh);

@@ -18,7 +18,10 @@ type ExportDebug = {
 
 async function waitForMap(page: import('@playwright/test').Page) {
   await page.waitForFunction(
-    () => (window as unknown as Record<string, unknown>)['__mapState'] === 'loaded',
+    () => {
+      const w = window as unknown as Record<string, unknown>;
+      return !!w['__map'] && !!w['__networkEditor'];
+    },
     { timeout: 20_000 },
   );
 }
@@ -26,6 +29,7 @@ async function waitForMap(page: import('@playwright/test').Page) {
 /** Seed the map with one line and two stations so there is data to export. */
 async function seedNetwork(page: import('@playwright/test').Page) {
   await page.locator('#tool-line').click();
+  await expect(page.locator('#line-panel')).toBeVisible({ timeout: 10_000 });
   await page.locator('#new-line-name').fill('Test Line');
   await page.locator('#new-line-add').click();
 
@@ -34,12 +38,13 @@ async function seedNetwork(page: import('@playwright/test').Page) {
   const cy = canvas!.y + canvas!.height / 2;
   await page.mouse.click(cx - 50, cy);
   await page.mouse.click(cx + 50, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 }
 
 /** Seed the map with two lines sharing a station (interchange). */
 async function seedTwoLines(page: import('@playwright/test').Page) {
   await page.locator('#tool-line').click();
+  await expect(page.locator('#line-panel')).toBeVisible({ timeout: 10_000 });
   await page.locator('#new-line-name').fill('Red Line');
   await page.locator('#new-line-add').click();
 
@@ -50,7 +55,7 @@ async function seedTwoLines(page: import('@playwright/test').Page) {
   await page.mouse.click(cx - 80, cy);
   await page.mouse.click(cx, cy);
   await page.mouse.click(cx + 80, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   // Create a second line
   await page.locator('#new-line-name').fill('Blue Line');
@@ -59,7 +64,7 @@ async function seedTwoLines(page: import('@playwright/test').Page) {
   // Blue line: top → centre (same station) → bottom
   await page.mouse.click(cx, cy - 60);
   await page.mouse.click(cx, cy + 60);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 }
 
 async function seedDeterministicInterchangeNetwork(page: import('@playwright/test').Page) {

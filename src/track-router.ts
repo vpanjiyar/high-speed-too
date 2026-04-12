@@ -3,8 +3,12 @@ import type { Coordinate } from './network-geometry';
 import { coordinateKey, getLineAtomicSegments } from './network-geometry';
 
 const RAIL_LINES_URL = '/data/rail_lines.geojson';
-const MAX_ANCHOR_DISTANCE_METERS = 1600;
+const MAX_ANCHOR_DISTANCE_METERS = 3200;
 const GRID_CELL_DEGREES = 0.08;
+const MAX_BRIDGE_DISTANCE_METERS = 900;
+const MAX_BRIDGE_CANDIDATES = 8;
+const BRIDGE_WEIGHT_MULTIPLIER = 2.2;
+const SNAP_TOLERANCE_METERS = 50; // merge nodes within 50m to bridge OSM data gaps
 
 interface GraphEdge {
   to: string;
@@ -207,6 +211,38 @@ function buildBaseSegmentIndex(segments: IndexedSegment[]): Map<string, number[]
   return index;
 }
 
+function connectNearbyNodes(graph: GraphData): void {
+  const radiusDeg = SNAP_TOLERANCE_METERS / 111320;
+  // Build a simple spatial index: cell -> list of [nodeId, coord]
+  const cellMap = new Map<string, Array<{ id: string; coord: Coordinate }>>();
+  for (const [id, coord] of graph.coords) {
+    const cx = Math.floor(coord[0] / GRID_CELL_DEGREES);
+    const cy = Math.floor(coord[1] / GRID_CELL_DEGREES);
+    const key = buildCellKey(cx, cy);
+    const bucket = cellMap.get(key);
+    if (bucket) bucket.push({ id, coord });
+    else cellMap.set(key, [{ id, coord }]);
+  }
+
+  for (const [id, coord] of graph.coords) {
+    for (const cell of getCellRange(coord, radiusDeg)) {
+      const bucket = cellMap.get(buildCellKey(cell.x, cell.y)) ?? [];
+      for (const other of bucket) {
+        if (other.id === id) continue;
+        const d = distanceMeters(coord, other.coord);
+        if (d > 0 && d <= SNAP_TOLERANCE_METERS) {
+          // Only add if not already connected
+          const existing = graph.edges.get(id);
+          if (!existing?.some((e) => e.to === other.id)) {
+            appendEdge(graph.edges, id, other.id, d);
+            appendEdge(graph.edges, other.id, id, d);
+          }
+        }
+      }
+    }
+  }
+}
+
 function isLineStringCoordinates(value: unknown): value is Coordinate[] {
   return Array.isArray(value)
     && value.every((coord) => Array.isArray(coord)
@@ -233,6 +269,9 @@ function buildGraphFromFeatureCollection(data: FeatureCollectionLike | null | un
     }
   }
 
+  // Connect nodes that are very close together (OSM data gaps)
+  connectNearbyNodes(graph);
+
   return {
     ...graph,
     segmentIndex: buildBaseSegmentIndex(graph.segments),
@@ -250,6 +289,13 @@ function buildUserGraph(network: Network): GraphData {
     for (const segment of getLineAtomicSegments(line, network)) {
       addUndirectedSegment(graph, segment.coordinates[0], segment.coordinates[1]);
     }
+  }
+
+  // Also add station positions as graph nodes so they can be connected
+  // to nearby base-graph segments during anchor building.
+  for (const station of network.stations) {
+    const coord: Coordinate = [station.lng, station.lat];
+    ensureNode(graph.coords, coord);
   }
 
   return graph;
@@ -271,6 +317,10 @@ function collectCandidateSegments(point: Coordinate, baseGraph: BaseGraph, userG
 function buildAnchor(point: Coordinate, baseGraph: BaseGraph, userGraph: GraphData): AnchorResult | null {
   const candidates = collectCandidateSegments(point, baseGraph, userGraph);
   let best: { segment: IndexedSegment; projection: ProjectionResult } | null = null;
+  let bestUserSeg: { segment: IndexedSegment; projection: ProjectionResult } | null = null;
+
+  // Track which segments come from user graph (existing routes)
+  const userSegSet = new Set(userGraph.segments);
 
   for (const segment of candidates) {
     const projection = projectPointToSegment(point, segment.a, segment.b);
@@ -278,6 +328,22 @@ function buildAnchor(point: Coordinate, baseGraph: BaseGraph, userGraph: GraphDa
     if (!best || projection.distanceMeters < best.projection.distanceMeters) {
       best = { segment, projection };
     }
+    // Track best user-graph segment separately
+    if (userSegSet.has(segment)) {
+      if (!bestUserSeg || projection.distanceMeters < bestUserSeg.projection.distanceMeters) {
+        bestUserSeg = { segment, projection };
+      }
+    }
+  }
+
+  // Prefer user graph segments (existing track/routes) when they're within
+  // a reasonable tolerance of the absolute best. This prevents stations from
+  // "jumping" to adjacent parallel tracks when they should stay on the current one.
+  const PREFER_USER_TOLERANCE_M = 100;
+  if (bestUserSeg && best &&
+      bestUserSeg.projection.distanceMeters < PREFER_USER_TOLERANCE_M &&
+      bestUserSeg.projection.distanceMeters < best.projection.distanceMeters + PREFER_USER_TOLERANCE_M) {
+    best = bestUserSeg;
   }
 
   if (!best) return null;
@@ -324,11 +390,12 @@ function getNeighbours(
   ];
 }
 
-function findPath(
+function findPathWithVirtualEdges(
   start: AnchorResult,
   end: AnchorResult,
   baseGraph: BaseGraph,
   userGraph: GraphData,
+  extraVirtualEdges: Array<{ from: string; to: string; weight: number }> = [],
 ): Coordinate[] | null {
   const coords = new Map<string, Coordinate>([
     ...baseGraph.coords.entries(),
@@ -338,7 +405,7 @@ function findPath(
   ]);
 
   const virtualEdges = new Map<string, GraphEdge[]>();
-  for (const edge of [...start.virtualEdges, ...end.virtualEdges]) {
+  for (const edge of [...start.virtualEdges, ...end.virtualEdges, ...extraVirtualEdges]) {
     appendEdge(virtualEdges, edge.from, edge.to, edge.weight);
   }
 
@@ -379,6 +446,86 @@ function findPath(
   }
 
   return null;
+}
+
+function getClosestNodes(
+  coords: Map<string, Coordinate>,
+  point: Coordinate,
+  limit: number,
+  maxDistanceM: number,
+  excludedNodeIds: Set<string>,
+): Array<{ nodeId: string; distanceM: number }> {
+  const nearest: Array<{ nodeId: string; distanceM: number }> = [];
+  for (const [nodeId, coord] of coords) {
+    if (excludedNodeIds.has(nodeId)) continue;
+    const dist = distanceMeters(point, coord);
+    if (dist > maxDistanceM) continue;
+    nearest.push({ nodeId, distanceM: dist });
+  }
+
+  nearest.sort((a, b) => a.distanceM - b.distanceM);
+  return nearest.slice(0, limit);
+}
+
+function buildBridgeEdges(
+  start: AnchorResult,
+  end: AnchorResult,
+  baseGraph: BaseGraph,
+  userGraph: GraphData,
+): Array<{ from: string; to: string; weight: number }> {
+  const coords = new Map<string, Coordinate>([
+    ...baseGraph.coords.entries(),
+    ...userGraph.coords.entries(),
+    [start.nodeId, start.coord],
+    [end.nodeId, end.coord],
+  ]);
+
+  const excluded = new Set<string>([start.nodeId, end.nodeId]);
+  const startCandidates = getClosestNodes(
+    coords,
+    start.coord,
+    MAX_BRIDGE_CANDIDATES,
+    MAX_BRIDGE_DISTANCE_METERS,
+    excluded,
+  );
+  const endCandidates = getClosestNodes(
+    coords,
+    end.coord,
+    MAX_BRIDGE_CANDIDATES,
+    MAX_BRIDGE_DISTANCE_METERS,
+    excluded,
+  );
+
+  const edges: Array<{ from: string; to: string; weight: number }> = [];
+
+  for (const candidate of startCandidates) {
+    const weight = candidate.distanceM * BRIDGE_WEIGHT_MULTIPLIER;
+    edges.push({ from: start.nodeId, to: candidate.nodeId, weight });
+    edges.push({ from: candidate.nodeId, to: start.nodeId, weight });
+  }
+
+  for (const candidate of endCandidates) {
+    const weight = candidate.distanceM * BRIDGE_WEIGHT_MULTIPLIER;
+    edges.push({ from: end.nodeId, to: candidate.nodeId, weight });
+    edges.push({ from: candidate.nodeId, to: end.nodeId, weight });
+  }
+
+  return edges;
+}
+
+function findPath(
+  start: AnchorResult,
+  end: AnchorResult,
+  baseGraph: BaseGraph,
+  userGraph: GraphData,
+): Coordinate[] | null {
+  const directPath = findPathWithVirtualEdges(start, end, baseGraph, userGraph);
+  if (directPath && directPath.length > 0) return directPath;
+
+  const bridgeEdges = buildBridgeEdges(start, end, baseGraph, userGraph);
+  if (bridgeEdges.length === 0) return null;
+
+  return findPathWithVirtualEdges(start, end, baseGraph, userGraph, bridgeEdges);
 }
 
 export class ExistingTrackRouter {

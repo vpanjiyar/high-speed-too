@@ -2,7 +2,7 @@
 """
 rail_lines_processor.py
 
-Downloads UK national rail line geometry from OpenStreetMap via the Overpass API,
+Downloads UK rail and metro line geometry from OpenStreetMap via the Overpass API,
 applies Douglas-Peucker simplification, and outputs a compact GeoJSON file for
 display at all zoom levels (including national overview).
 
@@ -12,6 +12,7 @@ Usage: python tools/rail_lines_processor.py
 """
 
 import json
+import re
 import urllib.request
 import urllib.parse
 import sys
@@ -22,16 +23,45 @@ OUT_PATH = Path(__file__).parent.parent / "public" / "data" / "rail_lines.geojso
 # UK bounding box: [min_lon, min_lat, max_lon, max_lat]
 UK_BBOX = "49.5,-8.0,61.0,2.0"  # Overpass uses south,west,north,east
 
-# Overpass query: UK national rail lines, excluding service/yard/siding tracks.
+# Overpass query: UK rail + metro lines, excluding service/yard/siding tracks.
 # Uses a bbox for speed instead of area lookup.
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OVERPASS_URLS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://lz4.overpass-api.de/api/interpreter",
+]
 QUERY = f"""
 [out:json][timeout:300][bbox:{UK_BBOX}];
 (
-  way["railway"="rail"]["service"!~"yard|siding|crossover|maintenance|depot"];
+    way["railway"~"^(rail|subway|light_rail|tram)$"]["service"!~"yard|siding|crossover|maintenance|depot"];
 );
 out geom qt;
 """
+
+
+# ── OSM tag helpers ───────────────────────────────────────────────────────────
+
+def parse_maxspeed_kmh(val):
+    """Parse an OSM maxspeed string to km/h (returns None if unrecognised).
+
+    NOTE: After changing this processor to emit maxspeed/electrified/voltage
+    fields you must re-run it (python tools/rail_lines_processor.py) to
+    regenerate public/data/rail_lines.geojson.  Without re-running, the
+    runtime RailSpeedIndex will find no speed data and fall back to curvature
+    limits for all segments.
+    """
+    if not val:
+        return None
+    val = val.strip()
+    # e.g. "75 mph", "125mph"
+    m = re.match(r'^(\d+(?:\.\d+)?)\s*mph$', val, re.IGNORECASE)
+    if m:
+        return round(float(m.group(1)) * 1.60934)
+    # e.g. "160", "200" — plain number means km/h per OSM spec
+    m = re.match(r'^(\d+(?:\.\d+)?)$', val)
+    if m:
+        return round(float(m.group(1)))
+    return None
 
 
 # ── Pure-Python Douglas-Peucker simplification ────────────────────────────────
@@ -66,23 +96,32 @@ def simplify(coords, tolerance):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    print("Querying Overpass API for UK national rail lines …")
+    print("Querying Overpass API for UK rail + metro lines …")
     print("(This may take 1–3 minutes for a full UK download)")
 
     data = urllib.parse.urlencode({"data": QUERY}).encode()
-    req = urllib.request.Request(
-        OVERPASS_URL,
-        data=data,
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "high-speed-too/1.0 (rail_lines_processor)",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=360) as resp:
-            raw = resp.read()
-    except Exception as exc:
-        print(f"ERROR downloading from Overpass: {exc}", file=sys.stderr)
+    raw = None
+    last_exc = None
+    for url in OVERPASS_URLS:
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "User-Agent": "high-speed-too/1.0 (rail_lines_processor)",
+            },
+        )
+        try:
+            print(f"  Trying endpoint: {url}")
+            with urllib.request.urlopen(req, timeout=360) as resp:
+                raw = resp.read()
+            break
+        except Exception as exc:
+            last_exc = exc
+            print(f"  Endpoint failed: {exc}", file=sys.stderr)
+
+    if raw is None:
+        print(f"ERROR downloading from Overpass: {last_exc}", file=sys.stderr)
         sys.exit(1)
 
     result = json.loads(raw)
@@ -107,14 +146,21 @@ def main():
             continue
 
         tags = el.get("tags", {})
+        # Resolve maxspeed from multiple possible tag names
+        maxspeed_raw = tags.get("maxspeed") or tags.get("maxspeed:railway") or tags.get("railway:maxspeed")
+        maxspeed_kmh = parse_maxspeed_kmh(maxspeed_raw)
         features.append(
             {
                 "type": "Feature",
                 "geometry": {"type": "LineString", "coordinates": simplified},
                 "properties": {
+                    "railway": tags.get("railway", ""),
                     "tunnel": tags.get("tunnel") == "yes",
                     "bridge": tags.get("bridge") == "yes",
                     "usage": tags.get("usage", ""),
+                    "maxspeed": maxspeed_kmh,          # int km/h or null
+                    "electrified": tags.get("electrified", ""),  # "rail", "contact_line", "4th_rail", "no", ""
+                    "voltage": tags.get("voltage", ""),           # "750", "25000", etc.
                 },
             }
         )

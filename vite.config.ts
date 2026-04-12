@@ -12,5 +12,15 @@ export default defineConfig({
     fs: {
       strict: false,
     },
+    proxy: {
+      '/api/rtt': {
+        target: 'https://api.rtt.io/api/v1',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/rtt/, ''),
+        headers: {
+          Authorization: `Basic ${process.env.VITE_RTT_AUTH ?? ''}`,
+        },
+      },
+    },
   },
 });

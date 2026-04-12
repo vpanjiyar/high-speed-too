@@ -18,6 +18,10 @@ public/tiles/
 scripts/pmtiles.exe
 scripts/pmtiles
 
+# Environment / secrets
+.env
+.env.*
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -38,6 +38,7 @@ const NAPTAN_HIT_PADDING = 10;
 interface NaptanHit {
   name: string;
   atco: string;
+  crs: string;
   lng: number;
   lat: number;
 }
@@ -55,6 +56,7 @@ export class NetworkEditor {
   private snapToExistingReason: string | null = null;
   private snapToExistingBusy = false;
   private snapAvailabilityToken = 0;
+  private _simMode = false;
 
   constructor(map: MaplibreMap, onStateChange?: EditorStateCallback) {
     this.map = map;
@@ -101,6 +103,16 @@ export class NetworkEditor {
   syncUI(): void {
     void this._refreshSnapAvailability();
     this._emit();
+  }
+
+  /** Set sim mode — when true, suppress all plan-mode click interactions. */
+  setSimMode(active: boolean): void {
+    this._simMode = active;
+    if (active) {
+      this.map.getCanvas().style.cursor = '';
+    } else {
+      this._updateCursor();
+    }
   }
 
   getState(): EditorState {
@@ -342,7 +354,13 @@ export class NetworkEditor {
     const name = (props['name'] as string | undefined) ?? 'Station';
     const atco = (props['atco'] as string | undefined) ?? '';
 
-    return { name, atco, lng: geom.coordinates[0], lat: geom.coordinates[1] };
+    // Derive CRS/TIPLOC from ATCO — rail stations have '9100' prefix
+    let crs = '';
+    if (atco.startsWith('9100') && atco.length > 4) {
+      crs = atco.slice(4);
+    }
+
+    return { name, atco, crs, lng: geom.coordinates[0], lat: geom.coordinates[1] };
   }
 
   /**
@@ -357,10 +375,24 @@ export class NetworkEditor {
       if (existing) return existing;
     }
     // 2. Create a new station snapped to the NaPTAN coordinates + name
-    return this.network.addStation(hit.lng, hit.lat, hit.name, hit.atco || undefined);
+    return this.network.addStation(hit.lng, hit.lat, hit.name, hit.atco || undefined, hit.crs || undefined);
   }
 
   private _onMapClick = async (e: MapMouseEvent): Promise<void> => {
+    // In sim mode, only allow station selection for departure board — never create/modify anything
+    if (this._simMode) {
+      const networkStationId = this.renderer.hitTestStation([e.point.x, e.point.y]);
+      if (networkStationId) {
+        this.selectedStationId = networkStationId;
+        this.renderer.setSelectedStation(networkStationId);
+      } else {
+        this.selectedStationId = null;
+        this.renderer.setSelectedStation(null);
+      }
+      this._emit();
+      return;
+    }
+
     const networkStationId = this.renderer.hitTestStation([e.point.x, e.point.y]);
     const naptanHit = this._hitTestNaptan([e.point.x, e.point.y]);
 
@@ -369,6 +401,11 @@ export class NetworkEditor {
         if (networkStationId) {
           this.selectedStationId = networkStationId;
           this.renderer.setSelectedStation(networkStationId);
+        } else if (naptanHit) {
+          // Clicked a real-world station in select mode — import and select it
+          const imported = this._getOrImportStation(naptanHit);
+          this.selectedStationId = imported.id;
+          this.renderer.setSelectedStation(imported.id);
         } else {
           const lineId = this.renderer.hitTestLine([e.point.x, e.point.y]);
           if (lineId) {
@@ -457,7 +494,7 @@ export class NetworkEditor {
     }
   };
 
-  private _updateCursor(): void {
+  _updateCursor(): void {
     const canvas = this.map.getCanvas();
     switch (this.mode) {
       case 'select':

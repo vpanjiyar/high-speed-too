@@ -6,6 +6,7 @@ import type { Network, Station, Line } from './network';
 import { getLineAtomicSegments, getLinePolylineCoordinates, normalizeAtomicSegmentKey } from './network-geometry';
 
 const SOURCE_STATIONS = 'network-stations';
+const SOURCE_PLATFORM_TRACKS = 'network-platform-tracks';
 const SOURCE_LINE_CASES = 'network-line-cases';
 const SOURCE_LINE_SEGMENTS = 'network-line-segments';
 const SOURCE_LINE_HIT = 'network-lines';
@@ -13,6 +14,7 @@ const SOURCE_LINE_HIT = 'network-lines';
 const LAYER_LINE_CASING     = 'network-line-casing';
 const LAYER_LINE             = 'network-line';
 const LAYER_LINE_HIT         = 'network-line-hit';
+const LAYER_PLATFORM_TRACKS  = 'network-platform-tracks';
 const LAYER_STATION_OUTER    = 'network-station-outer';
 const LAYER_STATION_INNER    = 'network-station-inner';
 const LAYER_STATION_LABEL    = 'network-station-label';
@@ -38,6 +40,7 @@ export class NetworkRenderer {
 
   update(): void {
     this._updateStationsSource();
+    this._updatePlatformTracksSource();
     this._updateLinesSource();
     this._updateStationSelection();
   }
@@ -81,6 +84,10 @@ export class NetworkRenderer {
 
   private _initSources(): void {
     this.map.addSource(SOURCE_STATIONS, {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    });
+    this.map.addSource(SOURCE_PLATFORM_TRACKS, {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
     });
@@ -140,6 +147,22 @@ export class NetworkRenderer {
         'line-color': '#000000',
         'line-width': ['+', ['coalesce', ['get', 'width'], 6], 8],
         'line-opacity': 0.01,
+      },
+      layout: {
+        'line-cap': 'round',
+        'line-join': 'round',
+      },
+    });
+
+    // Platform guide lines around each station (one short line per platform)
+    this.map.addLayer({
+      id: LAYER_PLATFORM_TRACKS,
+      type: 'line',
+      source: SOURCE_PLATFORM_TRACKS,
+      paint: {
+        'line-color': '#6b7280',
+        'line-width': 1.6,
+        'line-opacity': 0.55,
       },
       layout: {
         'line-cap': 'round',
@@ -235,6 +258,86 @@ export class NetworkRenderer {
         ...(stationColorMap.has(s.id) ? { lineColor: stationColorMap.get(s.id) } : {}),
       },
     }));
+
+    source.setData({ type: 'FeatureCollection', features });
+  }
+
+  private _updatePlatformTracksSource(): void {
+    const source = this.map.getSource(SOURCE_PLATFORM_TRACKS) as GeoJSONSource | undefined;
+    if (!source) return;
+
+    const neighbors = new Map<string, Array<{ lng: number; lat: number }>>();
+    for (const line of this.network.lines) {
+      for (let i = 0; i < line.stationIds.length; i++) {
+        const sid = line.stationIds[i];
+        if (!sid) continue;
+        const list = neighbors.get(sid) ?? [];
+        const prev = i > 0 ? this.network.getStation(line.stationIds[i - 1]!) : null;
+        const next = i < line.stationIds.length - 1 ? this.network.getStation(line.stationIds[i + 1]!) : null;
+        if (prev) list.push({ lng: prev.lng, lat: prev.lat });
+        if (next) list.push({ lng: next.lng, lat: next.lat });
+        neighbors.set(sid, list);
+      }
+    }
+
+    const features: GeoJSON.Feature[] = [];
+    const metersToLat = (m: number): number => m / 111320;
+    const metersToLng = (m: number, lat: number): number => m / (111320 * Math.max(0.2, Math.cos(lat * Math.PI / 180)));
+
+    for (const station of this.network.stations) {
+      const platforms = Math.max(1, Math.min(20, station.platforms ?? 2));
+      const linked = neighbors.get(station.id) ?? [];
+
+      let east = 1;
+      let north = 0;
+      if (linked.length > 0) {
+        east = 0;
+        north = 0;
+        for (const n of linked) {
+          east += (n.lng - station.lng) * Math.cos(station.lat * Math.PI / 180);
+          north += (n.lat - station.lat);
+        }
+        const mag = Math.hypot(east, north);
+        if (mag > 1e-9) {
+          east /= mag;
+          north /= mag;
+        } else {
+          east = 1;
+          north = 0;
+        }
+      }
+
+      // Along-track vector and perpendicular offset vector (in local ENU frame)
+      const alongEast = east;
+      const alongNorth = north;
+      const perpEast = -north;
+      const perpNorth = east;
+
+      const halfLenM = 40;
+      const spacingM = 7;
+      for (let p = 0; p < platforms; p++) {
+        const shiftM = (p - (platforms - 1) / 2) * spacingM;
+        const centerLng = station.lng + metersToLng(perpEast * shiftM, station.lat);
+        const centerLat = station.lat + metersToLat(perpNorth * shiftM);
+
+        const startLng = centerLng - metersToLng(alongEast * halfLenM, station.lat);
+        const startLat = centerLat - metersToLat(alongNorth * halfLenM);
+        const endLng = centerLng + metersToLng(alongEast * halfLenM, station.lat);
+        const endLat = centerLat + metersToLat(alongNorth * halfLenM);
+
+        features.push({
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: [[startLng, startLat], [endLng, endLat]],
+          },
+          properties: {
+            stationId: station.id,
+            platform: p + 1,
+          },
+        } as GeoJSON.Feature);
+      }
+    }
 
     source.setData({ type: 'FeatureCollection', features });
   }

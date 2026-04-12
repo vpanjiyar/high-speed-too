@@ -12,9 +12,18 @@ import type { NetworkExport } from './network';
 import { validateNetworkExport } from './network';
 import { fetchCatchmentStats, preloadLsoa, fetchLineCatchmentStats } from './station-manager';
 import { ROLLING_STOCK, ROLLING_STOCK_CATEGORIES, getRollingStock, computeLineStats } from './rolling-stock';
-import type { RollingStock, LineTrainStats, JourneyProfileSegment } from './rolling-stock';
+import type { RollingStock, LineTrainStats, JourneyProfilePoint, JourneyProfileSegment, JourneyStationStop } from './rolling-stock';
 import { buildExportPreviewHTML, openExportPage } from './map-export';
 import type { ExportStyle } from './map-export';
+import { railSpeedIndex } from './rail-speed-index';
+import { Simulation } from './simulation';
+import type { SimSpeed, TrainState } from './simulation';
+import { TrainRenderer } from './train-renderer';
+import { DepartureBoard } from './departure-board';
+import { SignalSystem, ASPECT_LABEL } from './signal-system';
+import type { SignalInfo } from './signal-system';
+import { buildTimetable, findActiveService } from './timetable';
+import type { Timetable, LineTimetableConfig } from './timetable';
 
 // Register the PMTiles custom protocol so MapLibre can load .pmtiles files
 // via HTTP range-requests from a single static file.
@@ -242,6 +251,147 @@ function hideAnimatedDisplay(element: HTMLElement, preset: MotionPreset): void {
   setAnimatedVisibility(element, false, { preset, strategy: 'display' });
 }
 
+type FloatingPanelPosition = { left: number; top: number };
+const FLOATING_PANEL_STORAGE_KEY = 'hst2-floating-panel-positions';
+const floatingPanelPositions = new Map<string, FloatingPanelPosition>();
+const floatingPanelElements = new Map<string, HTMLElement>();
+
+try {
+  const raw = window.localStorage.getItem(FLOATING_PANEL_STORAGE_KEY);
+  if (raw) {
+    const parsed = JSON.parse(raw) as Record<string, FloatingPanelPosition>;
+    for (const [panelKey, pos] of Object.entries(parsed)) {
+      if (
+        pos
+        && Number.isFinite(pos.left)
+        && Number.isFinite(pos.top)
+      ) {
+        floatingPanelPositions.set(panelKey, { left: pos.left, top: pos.top });
+      }
+    }
+  }
+} catch {
+  // Ignore invalid persisted panel coordinates.
+}
+
+function persistFloatingPanelPositions(): void {
+  try {
+    const payload = Object.fromEntries(floatingPanelPositions.entries());
+    window.localStorage.setItem(FLOATING_PANEL_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore persistence failures.
+  }
+}
+
+function clampFloatingPanelPosition(panel: HTMLElement, left: number, top: number): FloatingPanelPosition {
+  const margin = 8;
+  const rect = panel.getBoundingClientRect();
+  const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+  const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+  return {
+    left: Math.min(maxLeft, Math.max(margin, left)),
+    top: Math.min(maxTop, Math.max(margin, top)),
+  };
+}
+
+function applyFloatingPanelPosition(panel: HTMLElement, pos: FloatingPanelPosition): void {
+  const clamped = clampFloatingPanelPosition(panel, pos.left, pos.top);
+  panel.style.left = `${clamped.left}px`;
+  panel.style.top = `${clamped.top}px`;
+  panel.style.right = 'auto';
+  panel.style.bottom = 'auto';
+  panel.style.transform = 'none';
+}
+
+function makePanelPositionAbsolute(panel: HTMLElement): void {
+  const rect = panel.getBoundingClientRect();
+  applyFloatingPanelPosition(panel, { left: rect.left, top: rect.top });
+}
+
+function setupDraggableFloatingPanel(panelKey: string, panel: HTMLElement, handle: HTMLElement): void {
+  floatingPanelElements.set(panelKey, panel);
+  handle.classList.add('draggable-panel-handle');
+
+  const saved = floatingPanelPositions.get(panelKey);
+  if (saved) {
+    applyFloatingPanelPosition(panel, saved);
+  }
+
+  handle.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('button, input, select, textarea, a, label, [data-no-drag]')) {
+      return;
+    }
+
+    makePanelPositionAbsolute(panel);
+    const rect = panel.getBoundingClientRect();
+    const pointerOffsetX = event.clientX - rect.left;
+    const pointerOffsetY = event.clientY - rect.top;
+
+    panel.classList.add('is-being-dragged');
+    handle.setPointerCapture(event.pointerId);
+
+    const onPointerMove = (moveEvent: PointerEvent): void => {
+      const next = clampFloatingPanelPosition(
+        panel,
+        moveEvent.clientX - pointerOffsetX,
+        moveEvent.clientY - pointerOffsetY,
+      );
+      applyFloatingPanelPosition(panel, next);
+      floatingPanelPositions.set(panelKey, next);
+    };
+
+    const finishDrag = (): void => {
+      panel.classList.remove('is-being-dragged');
+      handle.removeEventListener('pointermove', onPointerMove);
+      floatingPanelPositions.set(panelKey, {
+        left: parseFloat(panel.style.left) || rect.left,
+        top: parseFloat(panel.style.top) || rect.top,
+      });
+      persistFloatingPanelPositions();
+    };
+
+    handle.addEventListener('pointermove', onPointerMove);
+    handle.addEventListener('pointerup', finishDrag, { once: true });
+    handle.addEventListener('pointercancel', finishDrag, { once: true });
+  });
+}
+
+function ensureFloatingPanelInViewport(panelKey: string, panel: HTMLElement): void {
+  const styleLeft = parseFloat(panel.style.left);
+  const styleTop = parseFloat(panel.style.top);
+  if (Number.isFinite(styleLeft) && Number.isFinite(styleTop)) {
+    const next = clampFloatingPanelPosition(panel, styleLeft, styleTop);
+    floatingPanelPositions.set(panelKey, next);
+    applyFloatingPanelPosition(panel, next);
+    persistFloatingPanelPositions();
+    return;
+  }
+
+  const saved = floatingPanelPositions.get(panelKey);
+  if (saved) {
+    const next = clampFloatingPanelPosition(panel, saved.left, saved.top);
+    floatingPanelPositions.set(panelKey, next);
+    applyFloatingPanelPosition(panel, next);
+    persistFloatingPanelPositions();
+  }
+}
+
+window.addEventListener('resize', () => {
+  for (const [panelKey, panel] of floatingPanelElements.entries()) {
+    const saved = floatingPanelPositions.get(panelKey);
+    if (!saved) continue;
+    const next = clampFloatingPanelPosition(panel, saved.left, saved.top);
+    floatingPanelPositions.set(panelKey, next);
+    applyFloatingPanelPosition(panel, next);
+  }
+  if (floatingPanelPositions.size > 0) {
+    persistFloatingPanelPositions();
+  }
+});
+
 function resolveTilesUrl(configuredUrl: string | undefined): string {
   const fallbackUrl = `${window.location.origin}/tiles/uk.pmtiles`;
   if (!configuredUrl) return fallbackUrl;
@@ -330,6 +480,14 @@ const METRO_LINE_LAYERS: { id: string; minzoom: number }[] = [
   { id: 'rail-light',        minzoom: 6 },
   { id: 'rail-tram',         minzoom: 8 },
 ];
+const TRACK_SPEED_LAYER = { id: 'rail-speed-limit-overlay', minzoom: 5 };
+const NETWORK_TRACK_SPEED_SOURCE_ID = 'network-track-speed-overlay';
+const NETWORK_TRACK_SPEED_LAYER_ID = 'network-track-speed-overlay';
+
+function formatSpeedLabel(speedKmh: number): string {
+  const mph = Math.round(speedKmh * 0.621371);
+  return `${Math.round(speedKmh)} km/h (${mph} mph)`;
+}
 
 const RAIL_STATION_LAYERS: { id: string; minzoom: number }[] = [
   { id: 'naptan-station-mainline', minzoom: 5  },
@@ -353,6 +511,48 @@ function setLayerGroupVisible(
 
 // Overlays panel wiring
 map.on('load', () => {
+  // Pre-load OSM speed limit index — ready before user switches to sim mode
+  void railSpeedIndex.load();
+
+  const speedToggle = document.getElementById('toggle-track-speed') as HTMLInputElement | null;
+  const speedLegend = document.getElementById('track-speed-legend');
+  const speedHoverTooltipEl = document.getElementById('speed-hover-tooltip');
+  const simSpeedKeyBtn = document.getElementById('sim-btn-speed-key') as HTMLButtonElement | null;
+  const simSpeedLegendEl = document.getElementById('sim-speed-legend');
+  let trackSpeedOverlayEnabled = speedToggle?.checked ?? false;
+  let simSpeedKeyVisible = false;
+
+  /** Set the speed layer visibility directly on the map (both national + network layers). */
+  const applySpeedLayerVisibility = (visible: boolean): void => {
+    if (map.getLayer(TRACK_SPEED_LAYER.id)) {
+      map.setLayoutProperty(TRACK_SPEED_LAYER.id, 'visibility', visible ? 'visible' : 'none');
+    }
+    if (map.getLayer(NETWORK_TRACK_SPEED_LAYER_ID)) {
+      map.setLayoutProperty(NETWORK_TRACK_SPEED_LAYER_ID, 'visibility', visible ? 'visible' : 'none');
+    }
+  };
+
+  const syncSimSpeedKeyUi = (): void => {
+    const inSimMode = document.body.classList.contains('sim-mode');
+    const simActive = inSimMode && simSpeedKeyVisible;
+    simSpeedLegendEl?.classList.toggle('hidden', !simActive);
+    simSpeedKeyBtn?.classList.toggle('sim-btn--active', simActive);
+    // In sim mode layers follow the sim toggle; in plan mode they follow the overlay checkbox
+    applySpeedLayerVisibility(inSimMode ? simSpeedKeyVisible : trackSpeedOverlayEnabled);
+  };
+
+  simSpeedKeyBtn?.addEventListener('click', () => {
+    simSpeedKeyVisible = !simSpeedKeyVisible;
+    syncSimSpeedKeyUi();
+  });
+
+  const setTrackSpeedOverlayVisible = (enabled: boolean): void => {
+    trackSpeedOverlayEnabled = enabled;
+    speedLegend?.classList.toggle('hidden', !enabled);
+    speedHoverTooltipEl?.classList.add('hidden');
+    syncSimSpeedKeyUi();
+  };
+
   // Rail line toggle (national rail)
   (document.getElementById('toggle-rail-lines') as HTMLInputElement | null)
     ?.addEventListener('change', (e) => {
@@ -370,6 +570,11 @@ map.on('load', () => {
     ?.addEventListener('change', (e) => {
       setLayerGroupVisible(RAIL_STATION_LAYERS, (e.target as HTMLInputElement).checked);
     });
+
+  speedToggle?.addEventListener('change', (e) => {
+    setTrackSpeedOverlayVisible((e.target as HTMLInputElement).checked);
+  });
+  setTrackSpeedOverlayVisible(trackSpeedOverlayEnabled);
 
   // ── Zoom level hotlinks ────────────────────────────────────────────────
   const zoomLinks = document.querySelectorAll<HTMLButtonElement>('.zoom-link');
@@ -400,6 +605,24 @@ map.on('load', () => {
   // Keep active state in sync as the user zooms
   map.on('zoom', updateZoomLinkActive);
   updateZoomLinkActive();
+
+  // Track whether the user is actively zooming/panning so follow mode
+  // doesn't fight against their interaction.
+  let userInteracting = false;
+  let userInteractingTimeout = 0;
+  const onInteractionStart = () => {
+    userInteracting = true;
+    clearTimeout(userInteractingTimeout);
+  };
+  const onInteractionEnd = () => {
+    // Small grace period so the camera settles before follow resumes
+    userInteractingTimeout = window.setTimeout(() => { userInteracting = false; }, 400);
+  };
+  map.on('mousedown', onInteractionStart);
+  map.on('touchstart', onInteractionStart);
+  map.on('wheel', onInteractionStart);
+  map.on('moveend', onInteractionEnd);
+  map.on('zoomend', onInteractionEnd);
 
   // Census overlay
   const overlay = new CensusOverlay(map, updateCensusUI);
@@ -627,7 +850,7 @@ map.on('load', () => {
 
       const distance = document.createElement('div');
       distance.className = 'journey-profile-stop-distance';
-      distance.textContent = `${stop.distanceKm.toFixed(1)} km`;
+      distance.textContent = `${(stop.distanceKm * 0.621371).toFixed(1)} mi`;
 
       item.appendChild(title);
       item.appendChild(meta);
@@ -722,8 +945,21 @@ map.on('load', () => {
         'font-size': '11',
         'text-anchor': 'end',
       });
-      speedLabel.textContent = `${Math.round(speed)}`;
+      speedLabel.textContent = `${Math.round(speed * 0.621371)}`;
       svg.appendChild(speedLabel);
+
+      // Secondary km/h label
+      if (speed > 0) {
+        const kmhLabel = createSvgElement('text', {
+          x: `${padding.left - 12}`,
+          y: `${yPos + 14}`,
+          fill: '#9aa3b3',
+          'font-size': '9',
+          'text-anchor': 'end',
+        });
+        kmhLabel.textContent = `${Math.round(speed)}`;
+        svg.appendChild(kmhLabel);
+      }
     }
 
     for (let index = 0; index <= 5; index++) {
@@ -833,7 +1069,7 @@ map.on('load', () => {
       transform: `rotate(-90 16 ${padding.top + (plotHeight / 2)})`,
       'text-anchor': 'middle',
     });
-    yAxisLabel.textContent = 'Speed (km/h)';
+    yAxisLabel.textContent = 'Speed (mph / km/h)';
     svg.appendChild(yAxisLabel);
 
     const hoverCapture = createSvgElement('rect', {
@@ -878,10 +1114,10 @@ map.on('load', () => {
         ? `Dwell at ${sample.segment.fromStationName ?? 'Station'}`
         : `${sample.segment.fromStationName ?? 'Origin'} → ${sample.segment.toStationName ?? 'Destination'}`;
 
-      journeyProfileHoverReadoutEl.textContent = `${formatElapsedTimeLabel(sample.timeSec)} · ${Math.round(sample.speedKmh)} km/h · ${phaseLabel}`;
+      journeyProfileHoverReadoutEl.textContent = `${formatElapsedTimeLabel(sample.timeSec)} · ${Math.round(sample.speedKmh * 0.621371)} mph (${Math.round(sample.speedKmh)} km/h) · ${phaseLabel}`;
       tooltipTitle.textContent = segmentLabel;
-      tooltipValue.textContent = `${Math.round(sample.speedKmh)} km/h at ${formatElapsedTimeLabel(sample.timeSec)}`;
-      tooltipMeta.textContent = `${phaseLabel} · ${sample.distanceKm.toFixed(1)} km from origin`;
+      tooltipValue.textContent = `${Math.round(sample.speedKmh * 0.621371)} mph (${Math.round(sample.speedKmh)} km/h) at ${formatElapsedTimeLabel(sample.timeSec)}`;
+      tooltipMeta.textContent = `${phaseLabel} · ${(sample.distanceKm * 0.621371).toFixed(1)} mi (${sample.distanceKm.toFixed(1)} km) from origin`;
 
       journeyProfileTooltipEl.classList.remove('hidden');
       const pixelY = (dotY / height) * rect.height;
@@ -919,10 +1155,10 @@ map.on('load', () => {
     document.getElementById('journey-profile-subtitle')!.textContent = stock
       ? `${line.name} · ${stock.designation} ${stock.name}`
       : line.name;
-    document.getElementById('journey-profile-summary')!.textContent = `${origin} to ${destination} over ${stats.totalDistanceKm.toFixed(1)} km, with ${intermediateStops} intermediate stop${intermediateStops === 1 ? '' : 's'}${stats.dwellTimeMin > 0 ? ` and ${formatDurationLabel(stats.dwellTimeMin)} of scheduled dwell time.` : '.'}`;
+    document.getElementById('journey-profile-summary')!.textContent = `${origin} to ${destination} over ${(stats.totalDistanceKm * 0.621371).toFixed(1)} mi (${stats.totalDistanceKm.toFixed(1)} km), with ${intermediateStops} intermediate stop${intermediateStops === 1 ? '' : 's'}${stats.dwellTimeMin > 0 ? ` and ${formatDurationLabel(stats.dwellTimeMin)} of scheduled dwell time.` : '.'}`;
     document.getElementById('journey-profile-total-time')!.textContent = formatDurationLabel(stats.totalTimeMin);
     document.getElementById('journey-profile-running-time')!.textContent = formatDurationLabel(stats.runningTimeMin);
-    document.getElementById('journey-profile-peak-speed')!.textContent = `${Math.round(stats.maxReachedSpeedKmh)} km/h`;
+    document.getElementById('journey-profile-peak-speed')!.textContent = `${Math.round(stats.maxReachedSpeedKmh * 0.621371)} mph (${Math.round(stats.maxReachedSpeedKmh)} km/h)`;
     document.getElementById('journey-profile-stop-count')!.textContent = `${stats.stationStops.length}`;
 
     renderJourneyProfileChart(line.color, stats);
@@ -976,7 +1212,160 @@ map.on('load', () => {
 
     if (stations.length < 2) return null;
 
-    return computeLineStats(stations, stock, line.trainCount ?? 1);
+    const baseStats = computeLineStats(stations, stock, line.trainCount ?? 1);
+    const cache = sim.getPolylineCaches().get(lineId);
+    if (!cache || cache.legs.length === 0) return baseStats;
+
+    const accelMs2 = Math.max(0.1, stock.accelerationMs2);
+    const brakeMs2 = Math.min(accelMs2, 0.7);
+    const sampleStepM = 500;
+
+    const limitAtDistanceM = (distanceM: number): number => {
+      const dist = clamp(distanceM, 0, cache.totalLengthM);
+      const dists = cache.cumulativeDistM;
+      const limits = cache.curvatureLimitsKmh;
+      let lo = 0;
+      let hi = dists.length - 1;
+      while (lo < hi - 1) {
+        const mid = (lo + hi) >> 1;
+        if (dists[mid]! <= dist) lo = mid;
+        else hi = mid;
+      }
+      const d0 = dists[lo]!;
+      const d1 = dists[hi]!;
+      const t = d1 > d0 ? (dist - d0) / (d1 - d0) : 0;
+      const raw = limits[lo]! + t * (limits[hi]! - limits[lo]!);
+      const kmh = raw >= 999 ? cache.lineMaxSpeedKmh : raw;
+      return Math.max(10, Math.min(cache.lineMaxSpeedKmh, kmh));
+    };
+
+    const profilePoints: JourneyProfilePoint[] = [{ timeSec: 0, speedKmh: 0, distanceKm: 0 }];
+    const profileSegments: JourneyProfileSegment[] = [];
+    const stationStops: JourneyStationStop[] = [{
+      stationIndex: 0,
+      name: stations[0]?.name ?? 'Stop 1',
+      arrivalTimeSec: 0,
+      departureTimeSec: 0,
+      dwellTimeSec: 0,
+      distanceKm: 0,
+    }];
+
+    let elapsedSec = 0;
+    let runningSec = 0;
+    let dwellSecTotal = 0;
+    let maxReachedSpeedKmh = 0;
+
+    for (let legIndex = 0; legIndex < cache.legs.length; legIndex++) {
+      const leg = cache.legs[legIndex]!;
+      const legLenM = Math.max(1, leg.lengthM);
+      const sampleCount = Math.max(2, Math.ceil(legLenM / sampleStepM) + 1);
+
+      const d: number[] = [];
+      const limitMs: number[] = [];
+      for (let i = 0; i < sampleCount; i++) {
+        const frac = i / (sampleCount - 1);
+        const localD = frac * legLenM;
+        const absD = leg.startM + localD;
+        d.push(localD);
+        limitMs.push(limitAtDistanceM(absD) / 3.6);
+      }
+
+      const accelEnv = new Array<number>(sampleCount).fill(0);
+      const brakeEnv = new Array<number>(sampleCount).fill(0);
+      accelEnv[0] = 0;
+      for (let i = 1; i < sampleCount; i++) {
+        const ds = d[i]! - d[i - 1]!;
+        accelEnv[i] = Math.min(limitMs[i]!, Math.sqrt(accelEnv[i - 1]! * accelEnv[i - 1]! + 2 * accelMs2 * ds));
+      }
+      brakeEnv[sampleCount - 1] = 0;
+      for (let i = sampleCount - 2; i >= 0; i--) {
+        const ds = d[i + 1]! - d[i]!;
+        brakeEnv[i] = Math.min(limitMs[i]!, Math.sqrt(brakeEnv[i + 1]! * brakeEnv[i + 1]! + 2 * brakeMs2 * ds));
+      }
+
+      const v = new Array<number>(sampleCount).fill(0).map((_, i) => Math.min(limitMs[i]!, accelEnv[i]!, brakeEnv[i]!));
+
+      for (let i = 0; i < sampleCount - 1; i++) {
+        const ds = d[i + 1]! - d[i]!;
+        const v0 = v[i]!;
+        const v1 = v[i + 1]!;
+        const avgV = Math.max(0.01, (v0 + v1) / 2);
+        const dt = ds / avgV;
+        const startTimeSec = elapsedSec;
+        const endTimeSec = elapsedSec + dt;
+        const startDistanceKm = (leg.startM + d[i]!) / 1000;
+        const endDistanceKm = (leg.startM + d[i + 1]!) / 1000;
+
+        let phase: JourneyProfileSegment['phase'] = 'cruising';
+        if (v1 > v0 + 0.2) phase = 'accelerating';
+        else if (v1 < v0 - 0.2) phase = 'braking';
+
+        profileSegments.push({
+          startTimeSec,
+          endTimeSec,
+          startSpeedKmh: v0 * 3.6,
+          endSpeedKmh: v1 * 3.6,
+          startDistanceKm,
+          endDistanceKm,
+          phase,
+          legIndex,
+          fromStationIndex: legIndex,
+          toStationIndex: legIndex + 1,
+          fromStationName: stations[legIndex]?.name,
+          toStationName: stations[legIndex + 1]?.name,
+        });
+
+        elapsedSec = endTimeSec;
+        runningSec += dt;
+        maxReachedSpeedKmh = Math.max(maxReachedSpeedKmh, v0 * 3.6, v1 * 3.6);
+        profilePoints.push({ timeSec: elapsedSec, speedKmh: v1 * 3.6, distanceKm: endDistanceKm });
+      }
+
+      const stationIndex = legIndex + 1;
+      const isTerminal = stationIndex === stations.length - 1;
+      const dwellTimeSec = isTerminal ? 0 : ((line.stationDwellTimes?.[line.stationIds[stationIndex] ?? ''] ?? 45));
+      const arrivalTimeSec = elapsedSec;
+      const departureTimeSec = elapsedSec + dwellTimeSec;
+      stationStops.push({
+        stationIndex,
+        name: stations[stationIndex]?.name ?? `Stop ${stationIndex + 1}`,
+        arrivalTimeSec,
+        departureTimeSec,
+        dwellTimeSec,
+        distanceKm: leg.endM / 1000,
+      });
+
+      if (dwellTimeSec > 0) {
+        profileSegments.push({
+          startTimeSec: elapsedSec,
+          endTimeSec: departureTimeSec,
+          startSpeedKmh: 0,
+          endSpeedKmh: 0,
+          startDistanceKm: leg.endM / 1000,
+          endDistanceKm: leg.endM / 1000,
+          phase: 'dwell',
+          legIndex,
+          fromStationIndex: stationIndex,
+          toStationIndex: stationIndex,
+          fromStationName: stations[stationIndex]?.name,
+          toStationName: stations[stationIndex]?.name,
+        });
+        elapsedSec = departureTimeSec;
+        dwellSecTotal += dwellTimeSec;
+        profilePoints.push({ timeSec: elapsedSec, speedKmh: 0, distanceKm: leg.endM / 1000 });
+      }
+    }
+
+    return {
+      ...baseStats,
+      runningTimeMin: runningSec / 60,
+      dwellTimeMin: dwellSecTotal / 60,
+      totalTimeMin: elapsedSec / 60,
+      maxReachedSpeedKmh,
+      profilePoints,
+      profileSegments,
+      stationStops,
+    };
   }
 
   function renderLmTotalTime(lineId: string): void {
@@ -1157,6 +1546,36 @@ map.on('load', () => {
       item.appendChild(rail);
       item.appendChild(nameEl);
       if (timeTag) item.appendChild(timeTag);
+
+      // Dwell time input for intermediate stops (not first/last)
+      if (!isFirst && !isLast) {
+        const dwellWrap = document.createElement('span');
+        dwellWrap.className = 'lm-stop-dwell';
+        const dwellInput = document.createElement('input');
+        dwellInput.type = 'number';
+        dwellInput.className = 'lm-stop-dwell-input';
+        dwellInput.min = '5';
+        dwellInput.max = '300';
+        dwellInput.step = '5';
+        dwellInput.title = 'Dwell time (seconds)';
+        dwellInput.value = String(line.stationDwellTimes?.[sid] ?? 45);
+        dwellInput.addEventListener('change', () => {
+          const val = Math.max(5, Math.min(300, parseInt(dwellInput.value, 10) || 45));
+          dwellInput.value = String(val);
+          if (!line.stationDwellTimes) line.stationDwellTimes = {};
+          if (val === 45) { delete line.stationDwellTimes[sid]; }
+          else { line.stationDwellTimes[sid] = val; }
+          editor.network.save();
+        });
+        dwellInput.addEventListener('click', (e) => e.stopPropagation());
+        const dwellLabel = document.createElement('span');
+        dwellLabel.className = 'lm-stop-dwell-label';
+        dwellLabel.textContent = 's';
+        dwellWrap.appendChild(dwellInput);
+        dwellWrap.appendChild(dwellLabel);
+        item.appendChild(dwellWrap);
+      }
+
       item.appendChild(handle);
 
       item.addEventListener('click', () => {
@@ -1210,7 +1629,7 @@ map.on('load', () => {
     document.getElementById('lm-train-flag')!.textContent = stock.flag;
     document.getElementById('lm-train-card-name')!.textContent = `${stock.designation} ${stock.name}`;
     document.getElementById('lm-train-card-sub')!.textContent = `${stock.manufacturer} · ${stock.country}`;
-    document.getElementById('lm-ts-speed')!.textContent = `${stock.maxSpeedKmh} km/h`;
+    document.getElementById('lm-ts-speed')!.textContent = `${Math.round(stock.maxSpeedKmh * 0.621371)} mph (${stock.maxSpeedKmh} km/h)`;
     document.getElementById('lm-ts-accel')!.textContent = `${stock.accelerationMs2} m/s²`;
     document.getElementById('lm-ts-cap')!.textContent = stock.totalCapacity.toLocaleString('en-GB');
     document.getElementById('lm-ts-cost')!.textContent = `£${stock.costMillionGbp}M`;
@@ -1253,7 +1672,7 @@ map.on('load', () => {
     const el = document.getElementById('lm-line-stats')!;
     showAnimatedClass(el, 'section');
 
-    document.getElementById('lm-ls-distance')!.textContent = `${stats.totalDistanceKm.toFixed(1)} km`;
+    document.getElementById('lm-ls-distance')!.textContent = `${(stats.totalDistanceKm * 0.621371).toFixed(1)} mi (${stats.totalDistanceKm.toFixed(1)} km)`;
     document.getElementById('lm-ls-time')!.textContent = formatDurationLabel(stats.totalTimeMin);
     document.getElementById('lm-ls-totalcost')!.textContent = `£${stats.totalCostM.toFixed(1)}M`;
     document.getElementById('lm-ls-capacity')!.textContent = stats.totalCapacity.toLocaleString('en-GB');
@@ -1289,8 +1708,8 @@ map.on('load', () => {
           </div>
           <div class="train-picker-stats">
             <div class="train-picker-stat">
-              <div class="train-picker-stat-val">${train.maxSpeedKmh}</div>
-              <div class="train-picker-stat-lbl">km/h</div>
+              <div class="train-picker-stat-val">${Math.round(train.maxSpeedKmh * 0.621371)}</div>
+              <div class="train-picker-stat-lbl">mph</div>
             </div>
             <div class="train-picker-stat">
               <div class="train-picker-stat-val">${train.totalCapacity.toLocaleString('en-GB')}</div>
@@ -1392,8 +1811,9 @@ map.on('load', () => {
 
     showAnimatedClass(smEl, 'drawer');
 
-    // Always update name + lines (may have changed)
+    // Always update name + lines + platforms (may have changed)
     (document.getElementById('station-manager-name') as HTMLInputElement).value = station.name;
+    (document.getElementById('sm-platform-count') as HTMLInputElement).value = String(station.platforms ?? 2);
     renderManagerLines(stationId);
 
     // Only re-fetch census when the selected station changes
@@ -1631,6 +2051,35 @@ map.on('load', () => {
     } else {
       editor.deleteSelectedStation();
     }
+  });
+
+  // ── Platform controls ──────────────────────────────────────────────────
+  const smPlatformInput = document.getElementById('sm-platform-count') as HTMLInputElement;
+
+  document.getElementById('sm-platform-dec')!.addEventListener('click', () => {
+    const state = editor.getState();
+    if (!state.selectedStationId) return;
+    const station = editor.network.getStation(state.selectedStationId);
+    const cur = station?.platforms ?? 2;
+    editor.network.setStationPlatforms(state.selectedStationId, cur - 1);
+    smPlatformInput.value = String(Math.max(1, cur - 1));
+  });
+
+  document.getElementById('sm-platform-inc')!.addEventListener('click', () => {
+    const state = editor.getState();
+    if (!state.selectedStationId) return;
+    const station = editor.network.getStation(state.selectedStationId);
+    const cur = station?.platforms ?? 2;
+    editor.network.setStationPlatforms(state.selectedStationId, cur + 1);
+    smPlatformInput.value = String(Math.min(20, cur + 1));
+  });
+
+  smPlatformInput.addEventListener('change', () => {
+    const state = editor.getState();
+    if (!state.selectedStationId) return;
+    const val = Math.max(1, Math.min(20, parseInt(smPlatformInput.value, 10) || 2));
+    editor.network.setStationPlatforms(state.selectedStationId, val);
+    smPlatformInput.value = String(val);
   });
 
   // ── Line Manager wiring ─────────────────────────────────────────────────
@@ -2052,6 +2501,1222 @@ map.on('load', () => {
   });
 
   document.getElementById('btn-export')!.addEventListener('click', openExportModal);
+
+  // ── Mode toggle (Plan / Simulate) ──────────────────────────────────────
+  let simMode = false;
+  const modeBtnPlan = document.getElementById('mode-btn-plan')!;
+  const modeBtnSim  = document.getElementById('mode-btn-sim')!;
+  const simToolbar  = document.getElementById('sim-toolbar')!;
+  const simHud      = document.getElementById('sim-hud')!;
+
+  function setSimMode(active: boolean): void {
+    simMode = active;
+    editor.setSimMode(active);
+    map.getCanvas().style.cursor = '';
+    document.body.classList.toggle('sim-mode', active);
+    modeBtnPlan.classList.toggle('mode-btn--active', !active);
+    modeBtnSim.classList.toggle('mode-btn--active', active);
+
+    if (active) {
+      simToolbar.classList.remove('hidden');
+      simHud.classList.remove('hidden');
+      trainRenderer.setVisible(true);
+      signalSystem.setVisible(true);
+      // Auto-start sim if not running
+      if (!sim.isRunning()) {
+        sim.reinit();
+        rebuildTimetable();
+        sim.start();
+        syncPlayBtn();
+      }
+      // Auto-zoom to fit the network so trains and signals are visible
+      fitMapToNetwork();
+      syncSimSpeedKeyUi();
+    } else {
+      simToolbar.classList.add('hidden');
+      simHud.classList.add('hidden');
+      tdPanel.classList.add('hidden');
+      sigDetailPanel.classList.add('hidden');
+      depBoard.close();
+      followedTrainId = null;
+      updateFollowedState();
+      if (sim.isRunning()) {
+        sim.stop();
+        syncPlayBtn();
+      }
+      // Clear and hide train/signal layers so they don't bleed into plan mode
+      trainRenderer.update([], undefined);
+      signalSystem.clear();
+      trainRenderer.setVisible(false);
+      signalSystem.setVisible(false);
+      speedHoverTooltipEl?.classList.add('hidden');
+      syncSimSpeedKeyUi();
+    }
+  }
+
+  modeBtnPlan.addEventListener('click', () => setSimMode(false));
+  modeBtnSim.addEventListener('click', () => setSimMode(true));
+
+  /** Fit map to the bounds of the network so trains/signals are visible. */
+  function fitMapToNetwork(): void {
+    const stations = simNetwork.stations;
+    if (stations.length < 2) return;
+    let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+    for (const s of stations) {
+      if (s.lng < minLng) minLng = s.lng;
+      if (s.lng > maxLng) maxLng = s.lng;
+      if (s.lat < minLat) minLat = s.lat;
+      if (s.lat > maxLat) maxLat = s.lat;
+    }
+    const pad = 0.02; // small padding in degrees
+    map.fitBounds(
+      [[minLng - pad, minLat - pad], [maxLng + pad, maxLat + pad]],
+      { padding: { top: 80, bottom: 80, left: 240, right: 60 }, maxZoom: 14, duration: 1200 },
+    );
+  }
+
+  // ── Simulation ──────────────────────────────────────────────────────────
+
+  const sim = new Simulation(editor.network);
+  const trainRenderer = new TrainRenderer(map);
+  const signalSystem  = new SignalSystem(map);
+  const depBoard      = new DepartureBoard();
+  const simNetwork    = editor.network;
+  _w['__sim'] = sim;
+
+  function ensureNetworkTrackSpeedLayer(): void {
+    if (!map.getSource(NETWORK_TRACK_SPEED_SOURCE_ID)) {
+      map.addSource(NETWORK_TRACK_SPEED_SOURCE_ID, {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      });
+    }
+    if (!map.getLayer(NETWORK_TRACK_SPEED_LAYER_ID)) {
+      map.addLayer({
+        id: NETWORK_TRACK_SPEED_LAYER_ID,
+        type: 'line',
+        source: NETWORK_TRACK_SPEED_SOURCE_ID,
+        minzoom: 6,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': [
+            'interpolate', ['linear'], ['to-number', ['get', 'speedKmh'], 0],
+            0,   '#6b7280',
+            40,  '#dc2626',
+            80,  '#f59e0b',
+            120, '#22c55e',
+            160, '#06b6d4',
+            220, '#3b82f6',
+          ],
+          'line-width': ['interpolate', ['linear'], ['zoom'],
+            6, 1.2, 10, 2.6, 14, 4.2, 18, 6,
+          ],
+          'line-opacity': ['interpolate', ['linear'], ['zoom'],
+            6, 0.65, 10, 0.85, 16, 1,
+          ],
+        },
+      }, 'network-station-label');
+    }
+  }
+
+  function updateNetworkTrackSpeedOverlayData(): void {
+    const source = map.getSource(NETWORK_TRACK_SPEED_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    if (!source) return;
+
+    const features: GeoJSON.Feature[] = [];
+    for (const line of editor.network.lines) {
+      const cache = sim.getPolylineCaches().get(line.id);
+      if (!cache) continue;
+      const coords = cache.coordinates;
+      const limits = cache.curvatureLimitsKmh;
+      if (coords.length < 2 || limits.length < 2) continue;
+
+      for (let i = 1; i < coords.length; i++) {
+        const prev = coords[i - 1]!;
+        const curr = coords[i]!;
+
+        const leftLimit = limits[i - 1]! >= 999 ? cache.lineMaxSpeedKmh : limits[i - 1]!;
+        const rightLimit = limits[i]! >= 999 ? cache.lineMaxSpeedKmh : limits[i]!;
+        const speedKmh = Math.max(10, Math.min(cache.lineMaxSpeedKmh, Math.min(leftLimit, rightLimit)));
+
+        features.push({
+          type: 'Feature',
+          geometry: {
+            type: 'LineString',
+            coordinates: [prev, curr],
+          },
+          properties: {
+            lineId: line.id,
+            lineName: line.name,
+            speedKmh: Math.round(speedKmh),
+          },
+        });
+      }
+    }
+
+    source.setData({ type: 'FeatureCollection', features });
+  }
+
+  ensureNetworkTrackSpeedLayer();
+  updateNetworkTrackSpeedOverlayData();
+  if (map.getLayer(NETWORK_TRACK_SPEED_LAYER_ID)) {
+    map.setLayoutProperty(NETWORK_TRACK_SPEED_LAYER_ID, 'visibility', trackSpeedOverlayEnabled ? 'visible' : 'none');
+  }
+
+  // Once OSM speed data finishes loading, rebuild polyline caches so
+  // curvature limits incorporate real track speed limits.
+  railSpeedIndex.onLoaded(() => {
+    sim.rebuildPolylineCaches();
+    updateNetworkTrackSpeedOverlayData();
+  });
+
+  // ── Timetable ─────────────────────────────────────────────────────────
+  let timetable: Timetable | null = null;
+  const ttConfigs = new Map<string, LineTimetableConfig>();
+
+  function rebuildTimetable(): void {
+    timetable = buildTimetable(simNetwork, sim.getPolylineCaches(), ttConfigs, sim.getState().stationWeights);
+  }
+
+  // ── Train detail panel state ──────────────────────────────────────────
+  let followedTrainId: string | null = null;
+  const tdPanel      = document.getElementById('train-detail-panel')!;
+  const tdColorBar   = document.getElementById('train-detail-color-bar')!;
+  const tdLine       = document.getElementById('train-detail-line')!;
+  const tdStock      = document.getElementById('train-detail-stock')!;
+  const tdHeadcode   = document.getElementById('train-detail-headcode')!;
+  const tdServiceDesc = document.getElementById('td-service-desc')!;
+  const tdSpeed      = document.getElementById('td-speed')!;
+  const tdStatus     = document.getElementById('td-status')!;
+  const tdOccupancy  = document.getElementById('td-occupancy')!;
+  const tdNextName   = document.getElementById('td-next-name')!;
+  const tdCarRow     = document.getElementById('td-carriage-row')!;
+  const tdFollowBtn  = document.getElementById('train-detail-follow')!;
+
+  function updateFollowedState(): void {
+    const trains = sim.getTrains();
+    for (const t of trains) {
+      t.isFollowed = t.id === followedTrainId;
+    }
+    tdFollowBtn.classList.toggle('following', followedTrainId !== null);
+    tdFollowBtn.textContent = followedTrainId !== null ? 'Following' : 'Follow';
+  }
+
+  tdFollowBtn.addEventListener('click', () => {
+    if (!followedTrainId) {
+      // Find the train that's currently displayed
+      const trainId = tdPanel.dataset.trainId;
+      if (trainId) {
+        followedTrainId = trainId;
+        updateFollowedState();
+        // Instant camera jump with offset — train appears above the panel
+        const t = sim.getTrains().find((tr) => tr.id === trainId);
+        if (t) map.easeTo({ center: [t.lng, t.lat], zoom: Math.max(map.getZoom(), 13), offset: [0, -120], duration: 0 });
+      }
+    } else {
+      followedTrainId = null;
+      updateFollowedState();
+    }
+  });
+
+  document.getElementById('train-detail-close')!.addEventListener('click', () => {
+    followedTrainId = null;
+    updateFollowedState();
+    tdPanel.classList.add('hidden');
+  });
+
+  function openTrainDetail(train: TrainState): void {
+    tdPanel.dataset.trainId = train.id;
+    tdColorBar.style.background = train.lineColor;
+    tdLine.textContent = train.lineName;
+    tdStock.textContent = `${train.rollingStockName} · ${train.carsPerUnit} cars`;
+    tdHeadcode.textContent = train.headcode;
+    tdServiceDesc.textContent = train.serviceDescription;
+    tdPanel.classList.remove('hidden');
+    ensureFloatingPanelInViewport('train-detail-panel', tdPanel);
+    updateTrainDetail(train);
+  }
+
+  function formatStatusLabel(train: TrainState): string {
+    switch (train.status) {
+      case 'running': return train.speedKmh < 1 ? 'Stopping' : 'Running';
+      case 'dwelling': return 'At station';
+      case 'waiting_signal': return 'Signal held';
+      case 'turnaround': return 'Turnaround';
+      default: return train.status;
+    }
+  }
+
+  function updateTrainDetail(train: TrainState): void {
+    const speedText = `${Math.round(train.speedKmh * 0.621371)} mph`;
+    if (tdSpeed.textContent !== speedText) tdSpeed.textContent = speedText;
+    const statusText = formatStatusLabel(train);
+    if (tdStatus.textContent !== statusText) tdStatus.textContent = statusText;
+    const occText = `${Math.round(train.occupancy * 100)}%`;
+    if (tdOccupancy.textContent !== occText) tdOccupancy.textContent = occText;
+    if (tdNextName.textContent !== train.nextStationName) tdNextName.textContent = train.nextStationName;
+    if (tdHeadcode.textContent !== train.headcode) tdHeadcode.textContent = train.headcode;
+    if (tdServiceDesc.textContent !== train.serviceDescription) tdServiceDesc.textContent = train.serviceDescription;
+    renderThameslinkDisplay(tdCarRow, train);
+  }
+
+  // ── PIS screen cycling state ──────────────────────────────────────────
+  type PisScreen = 'destination' | 'loading' | 'callingAt' | 'held';
+  const PIS_BASE_SCREENS: PisScreen[] = ['destination', 'loading', 'callingAt'];
+  const PIS_ALL_SCREENS: PisScreen[] = ['destination', 'loading', 'callingAt', 'held'];
+  const PIS_CYCLE_MS = 6000; // 6 seconds per screen
+  let pisCurrentScreen: PisScreen = 'destination';
+  let pisLastSwitchMs = 0;
+  let pisHeldWasActive = false;
+
+  /**
+   * Render a Thameslink Class 700-style passenger information display.
+   * Cycles between screens: destination, loading diagram, calling points.
+   * Dark navy LCD with scanlines, amber/white text, authentic GTR colours.
+   */
+  function renderThameslinkDisplay(container: HTMLElement, train: TrainState): void {
+    const cars = train.carsPerUnit;
+    const carLoads = train.carLoads && train.carLoads.length === cars
+      ? train.carLoads
+      : new Array(cars).fill(train.occupancy) as number[];
+
+    const now = performance.now();
+    const heldPageActive = train.signalHeldSec >= 10;
+    const activeScreens = heldPageActive ? PIS_ALL_SCREENS : PIS_BASE_SCREENS;
+
+    if (heldPageActive) {
+      // First activation: immediately show held page.
+      if (!pisHeldWasActive) {
+        pisCurrentScreen = 'held';
+        pisLastSwitchMs = now;
+      }
+      // If user manually moved away, return to held after one normal cycle period.
+      if (pisCurrentScreen !== 'held' && now - pisLastSwitchMs > PIS_CYCLE_MS) {
+        pisCurrentScreen = 'held';
+        pisLastSwitchMs = now;
+      }
+      // While held page is visible, pause auto-cycling.
+    } else {
+      // Hold cleared: remove held page and continue normal cycling.
+      if (pisCurrentScreen === 'held') {
+        pisCurrentScreen = 'destination';
+        pisLastSwitchMs = now;
+      }
+      if (!PIS_BASE_SCREENS.includes(pisCurrentScreen)) {
+        pisCurrentScreen = 'destination';
+        pisLastSwitchMs = now;
+      }
+      if (now - pisLastSwitchMs > PIS_CYCLE_MS) {
+        pisLastSwitchMs = now;
+        const idx = PIS_BASE_SCREENS.indexOf(pisCurrentScreen);
+        pisCurrentScreen = PIS_BASE_SCREENS[(idx + 1) % PIS_BASE_SCREENS.length]!;
+      }
+    }
+    pisHeldWasActive = heldPageActive;
+    container.dataset.tlfHeldActive = heldPageActive ? '1' : '0';
+
+    // Compute passenger count
+    const capacity = train.totalCapacity;
+    const capPerCar = capacity / cars;
+    let totalPax = 0;
+    for (let c = 0; c < cars; c++) totalPax += Math.round(carLoads[c]! * capPerCar);
+
+    // Build/rebuild DOM when car count changes
+    if (!container.dataset.tlfCars || parseInt(container.dataset.tlfCars) !== cars) {
+      container.dataset.tlfCars = String(cars);
+      container.innerHTML = '';
+
+      const screen = document.createElement('div');
+      screen.className = 'tlf-screen';
+
+      // Scanline overlay
+      const scanlines = document.createElement('div');
+      scanlines.className = 'tlf-scanlines';
+      screen.appendChild(scanlines);
+
+      // ── Screen 1: Destination ──
+      const destScreen = document.createElement('div');
+      destScreen.className = 'tlf-page tlf-page-dest';
+      destScreen.id = 'tlf-page-dest';
+      const destHeading = document.createElement('div');
+      destHeading.className = 'tlf-dest-heading';
+      destHeading.textContent = 'This train is for';
+      destScreen.appendChild(destHeading);
+      const destName = document.createElement('div');
+      destName.className = 'tlf-dest-name';
+      destName.id = 'tlf-dest-name';
+      destScreen.appendChild(destName);
+      const destPaxRow = document.createElement('div');
+      destPaxRow.className = 'tlf-pax-count';
+      destPaxRow.id = 'tlf-pax-count-dest';
+      destScreen.appendChild(destPaxRow);
+      screen.appendChild(destScreen);
+
+      // ── Screen 2: Loading diagram ──
+      const loadScreen = document.createElement('div');
+      loadScreen.className = 'tlf-page tlf-page-load';
+      loadScreen.id = 'tlf-page-load';
+
+      const loadHeader = document.createElement('div');
+      loadHeader.className = 'tlf-load-header';
+      const loadNextStop = document.createElement('span');
+      loadNextStop.className = 'tlf-load-next';
+      loadNextStop.id = 'tlf-load-next';
+      loadHeader.appendChild(loadNextStop);
+      const loadLabel = document.createElement('span');
+      loadLabel.className = 'tlf-load-label';
+      loadLabel.id = 'tlf-load-label';
+      loadHeader.appendChild(loadLabel);
+      loadScreen.appendChild(loadHeader);
+
+      const trainRow = document.createElement('div');
+      trainRow.className = 'tlf-train';
+      for (let i = 0; i < cars; i++) {
+        const carWrap = document.createElement('div');
+        carWrap.className = 'tlf-car-wrap';
+        const car = document.createElement('div');
+        car.className = 'tlf-car';
+        if (i === 0) car.classList.add('tlf-car-front');
+        if (i === cars - 1) car.classList.add('tlf-car-rear');
+        const fill = document.createElement('div');
+        fill.className = 'tlf-car-fill';
+        car.appendChild(fill);
+        for (const side of ['top', 'bottom'] as const) {
+          for (let d = 0; d < 2; d++) {
+            const door = document.createElement('div');
+            door.className = `tlf-door tlf-door-${side}`;
+            door.style.left = `${25 + d * 50}%`;
+            car.appendChild(door);
+          }
+        }
+        const win = document.createElement('div');
+        win.className = 'tlf-car-window';
+        car.appendChild(win);
+        carWrap.appendChild(car);
+        const numLabel = document.createElement('div');
+        numLabel.className = 'tlf-car-num';
+        numLabel.textContent = String(i + 1);
+        carWrap.appendChild(numLabel);
+        trainRow.appendChild(carWrap);
+      }
+      loadScreen.appendChild(trainRow);
+
+      const legend = document.createElement('div');
+      legend.className = 'tlf-legend';
+      for (const [label, cls] of [['Not busy', 'tlf-leg-green'], ['Busy', 'tlf-leg-amber'], ['Very busy', 'tlf-leg-red']] as const) {
+        const item = document.createElement('span');
+        item.className = `tlf-leg-item ${cls}`;
+        const dot = document.createElement('span');
+        dot.className = 'tlf-leg-dot';
+        item.appendChild(dot);
+        item.appendChild(document.createTextNode(label));
+        legend.appendChild(item);
+      }
+      loadScreen.appendChild(legend);
+
+      const paxCountLoad = document.createElement('div');
+      paxCountLoad.className = 'tlf-pax-count';
+      paxCountLoad.id = 'tlf-pax-count-load';
+      loadScreen.appendChild(paxCountLoad);
+      screen.appendChild(loadScreen);
+
+      // ── Screen 3: Calling at ──
+      const callScreen = document.createElement('div');
+      callScreen.className = 'tlf-page tlf-page-call';
+      callScreen.id = 'tlf-page-call';
+      const callHeading = document.createElement('div');
+      callHeading.className = 'tlf-call-heading';
+      callHeading.textContent = 'Calling at:';
+      callScreen.appendChild(callHeading);
+      const callList = document.createElement('div');
+      callList.className = 'tlf-call-list';
+      callList.id = 'tlf-call-list';
+      callScreen.appendChild(callList);
+      screen.appendChild(callScreen);
+
+      // ── Screen 4: Held at red signal ──
+      const heldPageScreen = document.createElement('div');
+      heldPageScreen.className = 'tlf-page tlf-page-held-screen';
+      heldPageScreen.id = 'tlf-page-held-screen';
+      const heldSignalHeader = document.createElement('div');
+      heldSignalHeader.className = 'tlf-held-screen-header';
+      heldSignalHeader.textContent = '⬤ RED SIGNAL';
+      heldPageScreen.appendChild(heldSignalHeader);
+      const heldScreenMsg = document.createElement('div');
+      heldScreenMsg.className = 'tlf-held-screen-msg';
+      heldScreenMsg.textContent = 'This train has been held';
+      heldPageScreen.appendChild(heldScreenMsg);
+      const heldScreenSub = document.createElement('div');
+      heldScreenSub.className = 'tlf-held-screen-sub';
+      heldScreenSub.textContent = 'We apologise for the delay';
+      heldPageScreen.appendChild(heldScreenSub);
+      screen.appendChild(heldPageScreen);
+
+      // ── Prev / Next nav buttons ──
+      const nav = document.createElement('div');
+      nav.className = 'tlf-nav';
+      const prevBtn = document.createElement('button');
+      prevBtn.className = 'tlf-nav-btn';
+      prevBtn.textContent = '◀';
+      prevBtn.title = 'Previous page';
+      prevBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const heldActive = container.dataset.tlfHeldActive === '1';
+        const screens = heldActive ? PIS_ALL_SCREENS : PIS_BASE_SCREENS;
+        const idx = Math.max(0, screens.indexOf(pisCurrentScreen));
+        pisCurrentScreen = screens[(idx - 1 + screens.length) % screens.length]!;
+        pisLastSwitchMs = performance.now();
+      });
+      const nextBtn = document.createElement('button');
+      nextBtn.className = 'tlf-nav-btn';
+      nextBtn.textContent = '▶';
+      nextBtn.title = 'Next page';
+      nextBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const heldActive = container.dataset.tlfHeldActive === '1';
+        const screens = heldActive ? PIS_ALL_SCREENS : PIS_BASE_SCREENS;
+        const idx = Math.max(0, screens.indexOf(pisCurrentScreen));
+        pisCurrentScreen = screens[(idx + 1) % screens.length]!;
+        pisLastSwitchMs = performance.now();
+      });
+      nav.appendChild(prevBtn);
+      // Page dots
+      for (const page of PIS_ALL_SCREENS) {
+        const dot = document.createElement('span');
+        dot.className = 'tlf-nav-dot';
+        dot.dataset.screen = page;
+        nav.appendChild(dot);
+      }
+      nav.appendChild(nextBtn);
+      screen.appendChild(nav);
+
+      container.appendChild(screen);
+    }
+
+    // ── Show/hide pages based on cycle ──
+    const pageDest = container.querySelector('#tlf-page-dest') as HTMLElement;
+    const pageLoad = container.querySelector('#tlf-page-load') as HTMLElement;
+    const pageCall = container.querySelector('#tlf-page-call') as HTMLElement;
+    const pageHeldScreen = container.querySelector('#tlf-page-held-screen') as HTMLElement;
+    if (pageDest) pageDest.style.display = pisCurrentScreen === 'destination' ? '' : 'none';
+    if (pageLoad) pageLoad.style.display = pisCurrentScreen === 'loading' ? '' : 'none';
+    if (pageCall) pageCall.style.display = pisCurrentScreen === 'callingAt' ? '' : 'none';
+    if (pageHeldScreen) pageHeldScreen.style.display = heldPageActive && pisCurrentScreen === 'held' ? '' : 'none';
+
+    // Update page dots
+    const dots = container.querySelectorAll<HTMLElement>('.tlf-nav-dot');
+    dots.forEach((dot) => {
+      const dotScreen = dot.dataset.screen as PisScreen | undefined;
+      const show = !!dotScreen && activeScreens.includes(dotScreen);
+      dot.style.display = show ? '' : 'none';
+      dot.classList.toggle('tlf-nav-dot-active', show && dotScreen === pisCurrentScreen);
+    });
+
+    // ── Update destination page ──
+    const destNameEl = container.querySelector('#tlf-dest-name') as HTMLElement;
+    if (destNameEl) {
+      const text = train.destinationName.toUpperCase();
+      if (destNameEl.textContent !== text) destNameEl.textContent = text;
+    }
+    const paxDestEl = container.querySelector('#tlf-pax-count-dest') as HTMLElement;
+    if (paxDestEl) {
+      const paxText = `${totalPax} / ${capacity} passengers`;
+      if (paxDestEl.textContent !== paxText) paxDestEl.textContent = paxText;
+    }
+
+    // ── Update loading page ──
+    const loadNextEl = container.querySelector('#tlf-load-next') as HTMLElement;
+    if (loadNextEl) {
+      const nextText = train.status === 'dwelling'
+        ? train.nextStationName
+        : `Next: ${train.nextStationName}`;
+      if (loadNextEl.textContent !== nextText) loadNextEl.textContent = nextText;
+    }
+    const loadLabelEl = container.querySelector('#tlf-load-label') as HTMLElement;
+    if (loadLabelEl) {
+      const avgLoad = train.occupancy;
+      const label = avgLoad > 0.8 ? 'Very busy' : avgLoad > 0.5 ? 'Busy' : 'Not busy';
+      const colour = avgLoad > 0.8 ? '#ef4444' : avgLoad > 0.5 ? '#f59e0b' : '#4ade80';
+      if (loadLabelEl.textContent !== label) {
+        loadLabelEl.textContent = label;
+        loadLabelEl.style.color = colour;
+      }
+    }
+    const carEls = container.querySelectorAll<HTMLElement>('.tlf-car');
+    for (let i = 0; i < cars; i++) {
+      const carEl = carEls[i];
+      if (!carEl) continue;
+      const load = carLoads[i]!;
+      const fillEl = carEl.querySelector<HTMLElement>('.tlf-car-fill');
+      if (fillEl) {
+        const pct = Math.round(load * 100);
+        fillEl.style.height = `${pct}%`;
+        fillEl.style.background = load > 0.8 ? '#ef4444' : load > 0.5 ? '#f59e0b' : '#4ade80';
+      }
+      carEl.title = `Car ${i + 1}: ${Math.round(load * 100)}%`;
+    }
+    const paxLoadEl = container.querySelector('#tlf-pax-count-load') as HTMLElement;
+    if (paxLoadEl) {
+      const paxText = `${totalPax} / ${capacity} passengers`;
+      if (paxLoadEl.textContent !== paxText) paxLoadEl.textContent = paxText;
+    }
+
+    // ── Update calling-at page ──
+    const callListEl = container.querySelector('#tlf-call-list') as HTMLElement;
+    if (callListEl) {
+      // Build calling points from the line's station list
+      const line = editor.network.lines.find(l => l.id === train.lineId);
+      if (line) {
+        const stationIds = line.stationIds;
+        const nextIdx = train.nextStationIndex;
+        const dir = train.direction;
+        const sc = stationIds.length;
+        const pisCache = sim.getPolylineCaches().get(train.lineId);
+        const rows: { name: string; eta: string }[] = [];
+        const holdBeforeDepartureSec = train.status === 'dwelling' || train.status === 'turnaround'
+          ? train.dwellRemainingSec
+          : 0;
+        const fmtEta = (remainingSec: number): string => {
+          const roundedMinutes = Math.max(0, Math.round(remainingSec / 60));
+          if (roundedMinutes >= 60) {
+            const hours = Math.floor(roundedMinutes / 60);
+            const minutes = roundedMinutes % 60;
+            return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+          }
+          return `${roundedMinutes}m`;
+        };
+        const reverseArrivalOffsetSec = (profileArrivalSec: number): number => {
+          const terminalArrivalSec = pisCache?.stationStops[sc - 1]?.arrivalTimeSec ?? 0;
+          return Math.max(0, terminalArrivalSec - profileArrivalSec);
+        };
+        const profileEtaSec = (profileArrivalSec: number, direction: 'forward' | 'reverse'): string => {
+          const targetOffsetSec = direction === 'forward'
+            ? profileArrivalSec
+            : reverseArrivalOffsetSec(profileArrivalSec);
+          const remaining = Math.max(0, targetOffsetSec - train.legElapsedSec) + holdBeforeDepartureSec;
+          return fmtEta(remaining);
+        };
+        if (dir === 'forward') {
+          for (let i = nextIdx; i < stationIds.length; i++) {
+            const sid = stationIds[i]!;
+            const st = editor.network.stations.find(s => s.id === sid);
+            const profileStop = pisCache?.stationStops[i];
+            const eta = profileStop ? profileEtaSec(profileStop.arrivalTimeSec, dir) : '';
+            rows.push({ name: st?.name ?? sid, eta });
+          }
+        } else {
+          for (let i = nextIdx; i >= 0; i--) {
+            const sid = stationIds[i]!;
+            const st = editor.network.stations.find(s => s.id === sid);
+            const profileStop = pisCache?.stationStops[sc - 1 - i];
+            const eta = profileStop ? profileEtaSec(profileStop.arrivalTimeSec, dir) : '';
+            rows.push({ name: st?.name ?? sid, eta });
+          }
+        }
+          const newKey = rows.map(r => `${r.name}|${r.eta}`).join('\n');
+          if (callListEl.dataset.rowKey !== newKey) {
+            callListEl.dataset.rowKey = newKey;
+            callListEl.innerHTML = '';
+            for (const row of rows) {
+              const rowEl = document.createElement('div');
+              rowEl.className = 'tlf-call-row';
+              const nameEl = document.createElement('span');
+              nameEl.className = 'tlf-call-name';
+              nameEl.textContent = row.name;
+              rowEl.appendChild(nameEl);
+              if (row.eta) {
+                const etaEl = document.createElement('span');
+                etaEl.className = 'tlf-call-eta';
+                etaEl.textContent = row.eta;
+                rowEl.appendChild(etaEl);
+              }
+              callListEl.appendChild(rowEl);
+            }
+          }
+      }
+    }
+  }
+
+  // ── Signal detail panel state ─────────────────────────────────────────
+  const sigDetailPanel = document.getElementById('signal-detail-panel')!;
+  const sdAspect       = document.getElementById('signal-detail-aspect')!;
+  const sdLine         = document.getElementById('signal-detail-line')!;
+  const sdBlockId      = document.getElementById('sd-block-id')!;
+  const sdDistance      = document.getElementById('sd-distance')!;
+  const sdAdjList      = document.getElementById('sd-adj-list')!;
+  const sdIcon         = document.getElementById('signal-detail-icon')!;
+
+  const tdHeader = document.getElementById('train-detail-header');
+  const sigHeader = document.getElementById('signal-detail-header');
+  const dbHeader = document.getElementById('db-header');
+  if (tdHeader) setupDraggableFloatingPanel('train-detail-panel', tdPanel, tdHeader);
+  if (sigHeader) setupDraggableFloatingPanel('signal-detail-panel', sigDetailPanel, sigHeader);
+  if (dbHeader) {
+    const boardPanel = document.getElementById('departure-board');
+    if (boardPanel) setupDraggableFloatingPanel('departure-board', boardPanel, dbHeader);
+  }
+
+  document.getElementById('signal-detail-close')!.addEventListener('click', () => {
+    delete sigDetailPanel.dataset.signalId;
+    sigDetailPanel.classList.add('hidden');
+  });
+
+  function openSignalDetail(info: SignalInfo): void {
+    sigDetailPanel.dataset.signalId = info.signalId;
+    sdAspect.textContent = ASPECT_LABEL[info.aspect];
+    sdAspect.style.color = info.aspect === 'red' ? '#ef4444'
+      : info.aspect.includes('yellow') ? '#f59e0b'
+      : '#22c55e';
+    sdLine.textContent = `${info.lineName} (${info.direction === 'forward' ? '→' : '←'})`;
+    sdLine.style.color = info.lineColor;
+    sdBlockId.textContent = `Block ${info.blockIndex}`;
+
+    // Show both distance and speed info
+    const distText = `${(info.distanceM / 1000).toFixed(1)} km`;
+    const lineSpeedMph = info.lineSpeedKmh > 0 ? Math.round(info.lineSpeedKmh * 0.621371) : 0;
+    const lineSpeedText = info.lineSpeedKmh > 0 ? `Line: ${lineSpeedMph} mph (${info.lineSpeedKmh} km/h)` : '';
+    const sigSpeedMph = info.signalSpeedKmh > 0 ? Math.round(info.signalSpeedKmh * 0.621371) : 0;
+    const sigSpeedText = info.signalSpeedKmh > 0
+      ? `Signal: ${sigSpeedMph} mph (${info.signalSpeedKmh} km/h)`
+      : info.aspect === 'red' ? 'Signal: STOP' : '';
+    sdDistance.innerHTML = `${distText}${lineSpeedText ? `<br><span style="font-size:11px;opacity:0.8">${lineSpeedText}</span>` : ''}${sigSpeedText ? `<br><span style="font-size:11px;opacity:0.8">${sigSpeedText}</span>` : ''}`;
+
+    sdAdjList.textContent = info.adjacentTrains.length > 0
+      ? info.adjacentTrains.join(', ')
+      : 'None';
+
+    // Draw realistic UK colour-light signal SVG
+    const topColor = info.aspect === 'red' ? '#ef4444'
+      : info.aspect.includes('yellow') ? '#f59e0b'
+      : '#22c55e';
+    const glowTop = info.aspect === 'green' ? 'rgba(34,197,94,0.5)'
+      : info.aspect === 'red' ? 'rgba(239,68,68,0.5)'
+      : 'rgba(245,158,11,0.5)';
+    const bottomColor = info.aspect === 'double-yellow' ? '#f59e0b' : '#2a2a3a';
+    const glowBottom = info.aspect === 'double-yellow' ? 'rgba(245,158,11,0.4)' : 'none';
+    const dirArrow = info.direction === 'forward' ? '→' : '←';
+    sdIcon.innerHTML = `<svg width="36" height="72" viewBox="0 0 36 72">
+      <!-- Post -->
+      <rect x="15" y="48" width="6" height="24" rx="1.5" fill="#3a3a4e"/>
+      <!-- Housing -->
+      <rect x="3" y="0" width="30" height="50" rx="7" fill="#1a1a2e" stroke="#5a5a6e" stroke-width="1.5"/>
+      <rect x="6" y="3" width="24" height="44" rx="5" fill="#111122"/>
+      <!-- Top light glow -->
+      <circle cx="18" cy="16" r="11" fill="${glowTop}" opacity="0.45"/>
+      <!-- Top light -->
+      <circle cx="18" cy="16" r="7" fill="${topColor}" opacity="0.95"/>
+      <circle cx="18" cy="16" r="3.5" fill="white" opacity="0.3"/>
+      <!-- Bottom light glow -->
+      ${glowBottom !== 'none' ? `<circle cx="18" cy="34" r="10" fill="${glowBottom}" opacity="0.4"/>` : ''}
+      <!-- Bottom light -->
+      <circle cx="18" cy="34" r="7" fill="${bottomColor}" opacity="0.95"/>
+      ${info.aspect === 'double-yellow' ? '<circle cx="18" cy="34" r="3.5" fill="white" opacity="0.2"/>' : ''}
+      <!-- Visor hoods -->
+      <path d="M7.5,9 Q18,5 28.5,9" stroke="#2a2a3e" stroke-width="2" fill="none"/>
+      <path d="M7.5,27 Q18,23 28.5,27" stroke="#2a2a3e" stroke-width="2" fill="none"/>
+      <!-- Direction label -->
+      <text x="18" y="65" text-anchor="middle" fill="#aaa" font-size="11">${dirArrow}</text>
+    </svg>`;
+
+    sigDetailPanel.classList.remove('hidden');
+    ensureFloatingPanelInViewport('signal-detail-panel', sigDetailPanel);
+  }
+
+  // ── Sim HUD ───────────────────────────────────────────────────────────
+  const hudTrains   = document.getElementById('sim-hud-trains')!;
+  const hudPax      = document.getElementById('sim-hud-pax')!;
+  const hudAvgSpeed = document.getElementById('sim-hud-avgspeed')!;
+  const hudOnTime   = document.getElementById('sim-hud-ontime')!;
+  const hudRevenue  = document.getElementById('sim-hud-revenue')!;
+  const hudCost     = document.getElementById('sim-hud-cost')!;
+  const hudDelivered = document.getElementById('sim-hud-delivered')!;
+  const hudSatisfaction = document.getElementById('sim-hud-satisfaction')!;
+
+  function updateHud(trains: TrainState[]): void {
+    hudTrains.textContent = String(trains.length);
+    let totalPax = 0;
+    let speedSum = 0;
+    let running = 0;
+    let waitingSignal = 0;
+    for (const t of trains) {
+      totalPax += Math.round(t.occupancy * t.totalCapacity);
+      if (t.status === 'running') {
+        speedSum += t.speedKmh;
+        running++;
+      }
+      if (t.status === 'waiting_signal') waitingSignal++;
+    }
+    hudPax.textContent = totalPax.toLocaleString('en-GB');
+    hudAvgSpeed.textContent = running > 0 ? `${Math.round((speedSum / running) * 0.621371)}` : '0';
+
+    // Real on-time performance: trains not held at signals
+    const onTimePct = trains.length > 0
+      ? Math.round(((trains.length - waitingSignal) / trains.length) * 100)
+      : 100;
+    hudOnTime.textContent = `${onTimePct}%`;
+    hudOnTime.style.color = onTimePct >= 90 ? '#22c55e' : onTimePct >= 70 ? '#f59e0b' : '#ef4444';
+
+    // Game metrics
+    const metrics = sim.getMetrics();
+    hudRevenue.textContent = metrics.totalRevenue >= 1000
+      ? `£${(metrics.totalRevenue / 1000).toFixed(1)}k`
+      : `£${Math.round(metrics.totalRevenue)}`;
+    hudCost.textContent = `£${metrics.operatingCostPerHour.toLocaleString('en-GB')}/hr`;
+    hudDelivered.textContent = metrics.totalPassengersDelivered.toLocaleString('en-GB');
+
+    const sat = Math.round(metrics.satisfaction);
+    hudSatisfaction.textContent = `${sat}%`;
+    hudSatisfaction.style.color = sat >= 80 ? '#22c55e' : sat >= 60 ? '#f59e0b' : '#ef4444';
+  }
+
+  // ── Sim clock formatter ───────────────────────────────────────────────
+  const simClockEl = document.getElementById('sim-clock')!;
+
+  function formatSimClock(sec: number): string {
+    const base = 6 * 3600;
+    const total = Math.floor(base + sec) % 86400;
+    const h = Math.floor(total / 3600) % 24;
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+
+  // ── Tick callback ─────────────────────────────────────────────────────
+  sim.setOnTick(() => {
+    const trains = sim.getTrains();
+
+    // Update train headcodes and service descriptions from the timetable
+    if (timetable) {
+      const simSec = sim.getSimTimeSec();
+      for (const t of trains) {
+        const cache = sim.getPolylineCaches().get(t.lineId);
+        if (!cache) continue;
+        const svc = findActiveService(timetable, t.lineId, t.direction, simSec, cache, t.legElapsedSec);
+        if (svc) {
+          t.headcode = svc.headcode;
+          t.serviceDescription = svc.description;
+          t.originName = svc.originName;
+          t.destinationName = svc.destinationName;
+        }
+      }
+    }
+
+    trainRenderer.update(trains, sim.getPolylineCaches());
+    signalSystem.update(sim, simNetwork, map.getZoom());
+    simClockEl.textContent = formatSimClock(sim.getSimTimeSec());
+
+    if (simMode) updateHud(trains);
+
+    if (depBoard.isOpen()) {
+      depBoard.update(sim, simNetwork);
+    }
+
+    // Refresh detail panel for the currently open train on every tick
+    if (!tdPanel.classList.contains('hidden')) {
+      const visId = tdPanel.dataset.trainId;
+      const vt = visId ? trains.find((tr) => tr.id === visId) : undefined;
+      if (vt) updateTrainDetail(vt);
+    }
+
+    // Refresh signal detail panel live on every tick
+    if (!sigDetailPanel.classList.contains('hidden')) {
+      const openSigId = sigDetailPanel.dataset.signalId;
+      if (openSigId) {
+        const info = signalSystem.getSignals().find(s => s.signalId === openSigId);
+        if (info) openSignalDetail(info);
+      }
+    }
+
+    // Update camera follow — offset so train sits above the detail panel
+    if (followedTrainId && !userInteracting) {
+      const t = trains.find((tr) => tr.id === followedTrainId);
+      if (t) {
+        // Offset upward so the train is centred in the visible area above the panel
+        // The detail panel is ~350px from the bottom; shift focal point up by ~150px
+        map.easeTo({ center: [t.lng, t.lat], offset: [0, -120], duration: 0, easing: (t) => t });
+      } else {
+        followedTrainId = null;
+        updateFollowedState();
+        tdPanel.classList.add('hidden');
+      }
+    }
+  });
+
+  // ── Play/Pause button ─────────────────────────────────────────────────
+  const simPlayBtn   = document.getElementById('sim-btn-play')!;
+  const simIconPlay  = document.getElementById('sim-icon-play')!;
+  const simIconPause = document.getElementById('sim-icon-pause')!;
+  const simPlayLabel = document.getElementById('sim-play-label')!;
+
+  function syncPlayBtn(): void {
+    const running = sim.isRunning();
+    simPlayBtn.classList.toggle('running', running);
+    simIconPlay.style.display  = running ? 'none' : '';
+    simIconPause.style.display = running ? '' : 'none';
+    simPlayLabel.textContent   = running ? 'Pause' : 'Play';
+  }
+
+  simPlayBtn.addEventListener('click', () => {
+    sim.toggle();
+    syncPlayBtn();
+    if (sim.isRunning() && sim.getTrains().length === 0) {
+      sim.reinit();
+      rebuildTimetable();
+    }
+  });
+
+  // ── Speed buttons ─────────────────────────────────────────────────────
+  document.querySelectorAll<HTMLButtonElement>('.sim-speed-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const speed = parseInt(btn.dataset.speed ?? '1', 10) as SimSpeed;
+      sim.setSpeed(speed);
+      document.querySelectorAll('.sim-speed-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+
+  // ── Time picker ───────────────────────────────────────────────────────
+  const simTimeInput    = document.getElementById('sim-time-input') as HTMLInputElement;
+  const simRealtimeBtn  = document.getElementById('sim-btn-realtime')!;
+
+  /** Convert absolute HH:MM:SS to sim seconds (offset from 06:00). */
+  function wallTimeToSimSec(h: number, m: number, s = 0): number {
+    return (h * 3600 + m * 60 + s) - 6 * 3600;
+  }
+
+  /** Commit the text value in simTimeInput and hide it. */
+  function commitTimeInput(): void {
+    document.removeEventListener('mousedown', onTimeInputOutsideClick);
+    const parts = simTimeInput.value.split(':').map(Number);
+    const h = isNaN(parts[0]) ? 6 : parts[0];
+    const m = isNaN(parts[1]) ? 0 : parts[1];
+    const s = isNaN(parts[2]) ? 0 : parts[2];
+    const targetSec = wallTimeToSimSec(h, m, s);
+    const wasRunning = sim.isRunning();
+    sim.stop();
+    sim.reinitAtTime(targetSec);
+    rebuildTimetable();
+    if (wasRunning) { sim.start(); syncPlayBtn(); }
+    simTimeInput.style.display = 'none';
+    simClockEl.style.display = 'inline';
+  }
+
+  /** Dismiss the input if the user clicks anywhere outside it. */
+  function onTimeInputOutsideClick(e: MouseEvent): void {
+    if (e.target === simTimeInput || e.target === simClockEl) return;
+    commitTimeInput();
+  }
+
+  simClockEl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const base = 6 * 3600;
+    const total = Math.floor(base + sim.getSimTimeSec()) % 86400;
+    const h = Math.floor(total / 3600) % 24;
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    simTimeInput.value = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    simClockEl.style.display = 'none';
+    simTimeInput.style.display = 'block';
+    requestAnimationFrame(() => {
+      simTimeInput.focus();
+      simTimeInput.select();
+      setTimeout(() => { document.addEventListener('mousedown', onTimeInputOutsideClick); }, 0);
+    });
+  });
+
+  simTimeInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter')  { e.preventDefault(); commitTimeInput(); }
+    if (e.key === 'Escape') {
+      document.removeEventListener('mousedown', onTimeInputOutsideClick);
+      simTimeInput.style.display = 'none';
+      simClockEl.style.display = '';
+    }
+  });
+
+  simRealtimeBtn.addEventListener('click', () => {
+    const now = new Date();
+    const targetSec = wallTimeToSimSec(now.getHours(), now.getMinutes(), now.getSeconds());
+    const wasRunning = sim.isRunning();
+    sim.stop();
+    sim.reinitAtTime(targetSec);
+    rebuildTimetable();
+    if (wasRunning) { sim.start(); syncPlayBtn(); }
+  });
+
+  // ── Click on train dot / signal / station in sim mode ───────────────
+  map.on('click', (e) => {
+    if (!simMode) return;
+
+    // Check train hit first
+    const trainId = trainRenderer.hitTest([e.point.x, e.point.y]);
+    if (trainId) {
+      const train = sim.getTrains().find((t) => t.id === trainId);
+      if (train) {
+        openTrainDetail(train);
+        return;
+      }
+    }
+
+    // Check signal hit
+    const signalInfo = signalSystem.hitTest([e.point.x, e.point.y]);
+    if (signalInfo) {
+      openSignalDetail(signalInfo);
+      return;
+    }
+
+    // Station selection is already handled by the network editor click handler
+    // (it fires on the same click event since both are map.on('click') listeners)
+  });
+
+  map.on('mousemove', (e) => {
+    if (!speedHoverTooltipEl) return;
+    const speedActive = simMode ? simSpeedKeyVisible : trackSpeedOverlayEnabled;
+    if (!speedActive) {
+      speedHoverTooltipEl.classList.add('hidden');
+      return;
+    }
+
+    const layersToQuery = [NETWORK_TRACK_SPEED_LAYER_ID, TRACK_SPEED_LAYER.id]
+      .filter((layerId) => Boolean(map.getLayer(layerId)));
+    if (layersToQuery.length === 0) {
+      speedHoverTooltipEl.classList.add('hidden');
+      return;
+    }
+
+    const pad = 8;
+    const bbox: [[number, number], [number, number]] = [
+      [e.point.x - pad, e.point.y - pad],
+      [e.point.x + pad, e.point.y + pad],
+    ];
+    const features = map.queryRenderedFeatures(bbox, { layers: layersToQuery });
+    if (features.length === 0) {
+      speedHoverTooltipEl.classList.add('hidden');
+      return;
+    }
+
+    let top: maplibregl.MapGeoJSONFeature | null = null;
+    let speedKmh = NaN;
+    for (const feature of features) {
+      const props = feature.properties ?? {};
+      const speedRaw = props['speedKmh'] ?? props['maxspeed'];
+      const parsed = Number(speedRaw);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        top = feature;
+        speedKmh = parsed;
+        break;
+      }
+    }
+
+    if (!top || !Number.isFinite(speedKmh) || speedKmh <= 0) {
+      speedHoverTooltipEl.classList.add('hidden');
+      return;
+    }
+
+    const props = top.properties ?? {};
+
+    const title = top.layer.id === NETWORK_TRACK_SPEED_LAYER_ID
+      ? `Line: ${String(props['lineName'] ?? 'Custom line')}`
+      : 'National rail track';
+    speedHoverTooltipEl.innerHTML = `<strong>${title}</strong><br/>Limit: ${formatSpeedLabel(speedKmh)}`;
+
+    const offsetX = 14;
+    const offsetY = 18;
+    const maxLeft = window.innerWidth - 280;
+    const maxTop = window.innerHeight - 70;
+    speedHoverTooltipEl.style.left = `${Math.min(maxLeft, Math.max(10, e.point.x + offsetX))}px`;
+    speedHoverTooltipEl.style.top = `${Math.min(maxTop, Math.max(10, e.point.y + offsetY))}px`;
+    speedHoverTooltipEl.classList.remove('hidden');
+  });
+
+  map.on('mouseleave', () => {
+    speedHoverTooltipEl?.classList.add('hidden');
+  });
+
+  // ── Station click → departure board ──────────────────────────────────
+  let lastSelectedStationId: string | null = null;
+  setInterval(() => {
+    if (!simMode) return;
+    const state = editor.getState();
+    const selId = state.selectedStationId ?? null;
+    if (selId !== lastSelectedStationId) {
+      lastSelectedStationId = selId;
+      if (selId) {
+        const station = editor.network.getStation(selId);
+        const stationName = station?.name ?? selId;
+        const stationCrs = station?.crs ?? undefined;
+        depBoard.open(selId, stationName, stationCrs);
+        depBoard.update(sim, simNetwork);
+      } else {
+        depBoard.close();
+      }
+    }
+  }, 200);
+
+  depBoard.setOnClose(() => {
+    editor.deselectStation();
+  });
+
+  // ── Timetable designer ─────────────────────────────────────────────────
+  const ttModal   = document.getElementById('timetable-modal')!;
+  const ttTabs    = document.getElementById('timetable-tabs')!;
+  const ttTbody   = document.getElementById('timetable-tbody')!;
+  const ttTph     = document.getElementById('tt-tph') as HTMLInputElement;
+  const ttFirst   = document.getElementById('tt-first-service') as HTMLInputElement;
+  const ttLast    = document.getElementById('tt-last-service') as HTMLInputElement;
+  const ttDemand  = document.getElementById('tt-demand-indicator')!;
+  let ttActiveLineId: string | null = null;
+
+  document.getElementById('sim-btn-timetable')!.addEventListener('click', () => {
+    rebuildTimetable();
+    renderTimetableTabs();
+    ttModal.classList.remove('hidden');
+  });
+
+  document.getElementById('timetable-close')!.addEventListener('click', () => {
+    ttModal.classList.add('hidden');
+  });
+
+  ttModal.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) ttModal.classList.add('hidden');
+  });
+
+  function renderTimetableTabs(): void {
+    ttTabs.innerHTML = '';
+    const lines = simNetwork.lines;
+    if (lines.length === 0) return;
+    if (!ttActiveLineId || !lines.find(l => l.id === ttActiveLineId)) {
+      ttActiveLineId = lines[0]!.id;
+    }
+    for (const line of lines) {
+      const tab = document.createElement('button');
+      tab.className = 'tt-tab' + (line.id === ttActiveLineId ? ' active' : '');
+      tab.textContent = line.name;
+      tab.style.borderBottomColor = line.id === ttActiveLineId ? line.color : 'transparent';
+      tab.addEventListener('click', () => {
+        ttActiveLineId = line.id;
+        renderTimetableTabs();
+        renderTimetableContent();
+      });
+      ttTabs.appendChild(tab);
+    }
+    renderTimetableContent();
+  }
+
+  function renderTimetableContent(): void {
+    if (!timetable || !ttActiveLineId) return;
+
+    const config = timetable.configs.get(ttActiveLineId);
+    if (config) {
+      const toTimeStr = (sec: number) => {
+        const h = Math.floor((sec / 3600) % 24);
+        const m = Math.floor((sec % 3600) / 60);
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      };
+      ttFirst.value = toTimeStr(config.firstServiceSec);
+      ttLast.value  = toTimeStr(config.lastServiceSec);
+      ttTph.value   = String(config.trainsPerHour);
+    }
+
+    const services = timetable.services.filter(s => s.lineId === ttActiveLineId);
+    ttTbody.innerHTML = '';
+
+    // Demand bar
+    const avgLoad = services.length > 0
+      ? services.reduce((s, svc) => s + svc.estimatedLoad, 0) / services.length
+      : 0;
+    ttDemand.style.setProperty('--demand-pct', `${Math.round(avgLoad * 100)}%`);
+
+    for (const svc of services) {
+      const tr = document.createElement('tr');
+      const loadPct = Math.round(svc.estimatedLoad * 100);
+      const loadClass = loadPct > 80 ? 'tt-load-red' : loadPct > 50 ? 'tt-load-amber' : 'tt-load-green';
+
+      tr.innerHTML = `
+        <td class="tt-headcode">${svc.headcode}</td>
+        <td>${formatSimClock(svc.departureTimeSec - 6 * 3600)}</td>
+        <td>${svc.originName}</td>
+        <td>${svc.destinationName}</td>
+        <td>${svc.intermediateStops}</td>
+        <td><div class="tt-load-bar"><div class="tt-load-fill ${loadClass}" style="width:${loadPct}%"></div></div> ${loadPct}%</td>
+      `;
+      ttTbody.appendChild(tr);
+    }
+  }
+
+  // Timetable controls → rebuild
+  function parseTimetableInputs(): void {
+    if (!ttActiveLineId) return;
+    const parseTime = (val: string) => {
+      const [h, m] = val.split(':').map(Number);
+      return (h ?? 6) * 3600 + (m ?? 0) * 60;
+    };
+    ttConfigs.set(ttActiveLineId, {
+      lineId: ttActiveLineId,
+      firstServiceSec: parseTime(ttFirst.value),
+      lastServiceSec: parseTime(ttLast.value),
+      trainsPerHour: Math.max(1, parseInt(ttTph.value, 10) || 4),
+    });
+
+    // Keep simulation service level aligned with timetable tph.
+    const cfg = ttConfigs.get(ttActiveLineId);
+    const cache = sim.getPolylineCaches().get(ttActiveLineId);
+    const line = editor.network.getLine(ttActiveLineId);
+    if (cfg && cache && line?.rollingStockId) {
+      const requiredUnits = Math.max(1, Math.ceil((cfg.trainsPerHour * cache.roundTripSec) / 3600));
+      const currentUnits = Math.max(1, line.trainCount ?? 1);
+      if (requiredUnits !== currentUnits) {
+        editor.network.setLineTrainCount(ttActiveLineId, requiredUnits);
+        const wasRunning = sim.isRunning();
+        const simNow = sim.getSimTimeSec();
+        sim.stop();
+        sim.reinitAtTime(simNow);
+        if (wasRunning) { sim.start(); syncPlayBtn(); }
+      }
+    }
+
+    rebuildTimetable();
+    renderTimetableContent();
+  }
+
+  ttTph.addEventListener('change', parseTimetableInputs);
+  ttFirst.addEventListener('change', parseTimetableInputs);
+  ttLast.addEventListener('change', parseTimetableInputs);
+
+  // Re-init simulation when network changes
+  editor.network.onChange(() => {
+    sim.rebuildPolylineCaches();
+    updateNetworkTrackSpeedOverlayData();
+
+    if (!sim.isRunning()) return;
+    sim.reinit();
+    rebuildTimetable();
+    loadStationWeights();
+  });
+
+  /** Pre-fetch catchment data for all stations and load weights into sim. */
+  function loadStationWeights(): void {
+    const stations = editor.network.stations;
+    if (stations.length === 0) return;
+    const promises = stations.map((s) => fetchCatchmentStats(s.lng, s.lat).then((st) => ({
+      id: s.id,
+      pop: st.population,
+    })).catch(() => ({ id: s.id, pop: 0 })));
+
+    Promise.all(promises).then((results) => {
+      const maxPop = Math.max(1, ...results.map((r) => r.pop));
+      const weights = new Map<string, number>();
+      for (const r of results) {
+        // Keep a demand floor so viable corridors are not starved by sparse census cells.
+        const normalised = r.pop / maxPop;
+        const boosted = 0.25 + normalised * 0.75;
+        weights.set(r.id, Math.min(1, Math.max(0.25, boosted)));
+      }
+      sim.setStationWeights(weights);
+    }).catch(() => { /* silent — passenger weights are optional */ });
+  }
+
+  loadStationWeights();
+  syncPlayBtn();
 });
 
 function updateCensusUI(state: CensusOverlayState): void {

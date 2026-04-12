@@ -4,7 +4,10 @@ const BASE = 'http://localhost:5174';
 
 async function waitForMap(page: import('@playwright/test').Page) {
   await page.waitForFunction(
-    () => (window as unknown as Record<string, unknown>)['__mapState'] === 'loaded',
+    () => {
+      const w = window as unknown as Record<string, unknown>;
+      return !!w['__map'] && !!w['__networkEditor'];
+    },
     { timeout: 20_000 },
   );
 }
@@ -216,7 +219,7 @@ test('clicking map in station mode places a station', async ({ page }) => {
   const canvas = await page.locator('#map canvas').boundingBox();
   expect(canvas).not.toBeNull();
   await page.mouse.click(canvas!.x + canvas!.width / 2, canvas!.y + canvas!.height / 2);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   expect(await getStationCount(page)).toBe(1);
 });
@@ -232,7 +235,7 @@ test('placing two stations increments count correctly', async ({ page }) => {
 
   await page.mouse.click(cx - 40, cy);
   await page.mouse.click(cx + 40, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   expect(await getStationCount(page)).toBe(2);
 });
@@ -242,9 +245,10 @@ test('clicking map in select mode does not place a station', async ({ page }) =>
   await waitForMap(page);
 
   // Stay in select mode (default)
+  // Click near the top-left of the canvas (ocean at default UK view) to avoid NaPTAN stations
   const canvas = await page.locator('#map canvas').boundingBox();
-  await page.mouse.click(canvas!.x + canvas!.width / 2, canvas!.y + canvas!.height / 2);
-  await page.waitForTimeout(300);
+  await page.mouse.click(canvas!.x + 50, canvas!.y + 50);
+  await page.waitForTimeout(100);
 
   expect(await getStationCount(page)).toBe(0);
 });
@@ -336,7 +340,7 @@ test('clicking map in line mode places station and adds to line', async ({ page 
   const cy = canvas!.y + canvas!.height / 2;
   await page.mouse.click(cx - 40, cy);
   await page.mouse.click(cx + 40, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   expect(await getStationCount(page)).toBe(2);
 
@@ -361,7 +365,7 @@ test('line list shows correct station count after drawing', async ({ page }) => 
   await page.mouse.click(cx - 50, cy);
   await page.mouse.click(cx, cy);
   await page.mouse.click(cx + 50, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await expect(page.locator('.line-item-stations')).toHaveText('3 stn');
 });
@@ -638,12 +642,12 @@ test('clicking a placed station in select mode opens station manager', async ({ 
   const cx = canvas!.x + canvas!.width / 2;
   const cy = canvas!.y + canvas!.height / 2;
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   // Switch to select and click the station
   await page.locator('#tool-select').click();
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await expect(page.locator('#station-manager')).not.toHaveClass(/hidden/);
 });
@@ -658,9 +662,10 @@ test('network data persists across page reloads', async ({ page }) => {
   await page.locator('#tool-station').click();
   const canvas = await page.locator('#map canvas').boundingBox();
   await page.mouse.click(canvas!.x + canvas!.width / 2, canvas!.y + canvas!.height / 2);
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(50);
 
   await page.locator('#tool-line').click();
+  await expect(page.locator('#line-panel')).toBeVisible({ timeout: 10_000 });
   await page.locator('#new-line-name').fill('Piccadilly');
   await page.locator('#new-line-add').click();
 
@@ -691,7 +696,7 @@ test('clicking a NaPTAN station in station mode imports it with correct name and
   await page.locator('#tool-station').click();
   const canvas = await page.locator('#map canvas').boundingBox();
   await page.mouse.click(canvas!.x + canvas!.width / 2, canvas!.y + canvas!.height / 2);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   expect(await getStationCount(page)).toBe(1);
 
@@ -718,11 +723,11 @@ test('clicking the same NaPTAN station twice in station mode does not duplicate 
 
   // Click twice on the same NaPTAN station
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(50);
   // Switch back to station mode (first click selects then switches to select)
   await page.locator('#tool-station').click();
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(50);
 
   // Only one station should exist with this ATCO
   const stations = await page.evaluate(() =>
@@ -745,7 +750,7 @@ test('clicking a NaPTAN station in line mode snaps station to real coordinates a
 
   const canvas = await page.locator('#map canvas').boundingBox();
   await page.mouse.click(canvas!.x + canvas!.width / 2, canvas!.y + canvas!.height / 2);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   expect(await getStationCount(page)).toBe(1);
 
@@ -780,9 +785,9 @@ test('adding the same NaPTAN station to a line twice does not duplicate the stat
   // Click the NaPTAN station twice at two different canvas positions
   // (same fake station is returned both times)
   await page.mouse.click(cx - 30, cy);
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(50);
   await page.mouse.click(cx + 30, cy);
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(50);
 
   // Only one network station should have been created
   const stations = await page.evaluate(() =>
@@ -809,7 +814,7 @@ test('NaPTAN station imported via station mode persists atco after reload', asyn
   await page.locator('#tool-station').click();
   const canvas = await page.locator('#map canvas').boundingBox();
   await page.mouse.click(canvas!.x + canvas!.width / 2, canvas!.y + canvas!.height / 2);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   // Verify atco saved before reload
   const atcoBefore = await page.evaluate(() =>
@@ -841,7 +846,7 @@ test('station manager shows the station name in the input', async ({ page }) => 
   const cx = canvas!.x + canvas!.width / 2;
   const cy = canvas!.y + canvas!.height / 2;
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   // Read out the auto-generated name so the test is independent of order
   const stationName = await page.evaluate(() =>
@@ -852,7 +857,7 @@ test('station manager shows the station name in the input', async ({ page }) => 
   // Select the station
   await page.locator('#tool-select').click();
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await expect(page.locator('#station-manager-name')).toHaveValue(stationName);
 });
@@ -866,16 +871,16 @@ test('renaming station via input updates network data', async ({ page }) => {
   const cx = canvas!.x + canvas!.width / 2;
   const cy = canvas!.y + canvas!.height / 2;
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await page.locator('#tool-select').click();
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   // Rename via the input
   await page.locator('#station-manager-name').fill('New Brighton');
   await page.locator('#station-manager-name').press('Enter');
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(50);
 
   const name = await page.evaluate(() =>
     ((window as unknown as { __networkEditor: { network: { stations: Array<{ name: string }> } } })
@@ -893,11 +898,11 @@ test('station manager close button hides the panel', async ({ page }) => {
   const cx = canvas!.x + canvas!.width / 2;
   const cy = canvas!.y + canvas!.height / 2;
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await page.locator('#tool-select').click();
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await expect(page.locator('#station-manager')).not.toHaveClass(/hidden/);
 
@@ -914,14 +919,14 @@ test('station manager delete button removes station and closes panel', async ({ 
   const cx = canvas!.x + canvas!.width / 2;
   const cy = canvas!.y + canvas!.height / 2;
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await page.locator('#tool-select').click();
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await page.locator('#station-manager-delete').click();
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(50);
 
   expect(await getStationCount(page)).toBe(0);
   await expect(page.locator('#station-manager')).toHaveClass(/hidden/);
@@ -936,11 +941,11 @@ test('switching to station mode closes station manager', async ({ page }) => {
   const cx = canvas!.x + canvas!.width / 2;
   const cy = canvas!.y + canvas!.height / 2;
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await page.locator('#tool-select').click();
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await expect(page.locator('#station-manager')).not.toHaveClass(/hidden/);
 
@@ -957,11 +962,11 @@ test('station manager lines section shows empty state when station is on no line
   const cx = canvas!.x + canvas!.width / 2;
   const cy = canvas!.y + canvas!.height / 2;
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await page.locator('#tool-select').click();
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await expect(page.locator('#sm-lines-list .sm-lines-empty')).toBeVisible();
 });
@@ -979,12 +984,12 @@ test('station manager lines section lists lines station belongs to', async ({ pa
   const cx = canvas!.x + canvas!.width / 2;
   const cy = canvas!.y + canvas!.height / 2;
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   // Select the placed station
   await page.locator('#tool-select').click();
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await expect(page.locator('#sm-lines-list .sm-line-name')).toHaveText('Coastal Express');
 });
@@ -998,7 +1003,7 @@ test('station manager shows census loading indicator then populates stats', asyn
   const cx = canvas!.x + canvas!.width / 2;
   const cy = canvas!.y + canvas!.height / 2;
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await page.locator('#tool-select').click();
   await page.mouse.click(cx, cy);
@@ -1043,7 +1048,7 @@ test('line manager rename updates the line list', async ({ page }) => {
 
   await page.locator('#line-manager-name').fill('New Name');
   await page.locator('#line-manager-name').press('Enter');
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(50);
 
   await expect(page.locator('.line-item-name').filter({ hasText: 'New Name' })).toBeVisible();
 });
@@ -1091,7 +1096,7 @@ test('line manager delete button removes the line', async ({ page }) => {
   await page.locator('#new-line-add').click();
 
   await page.locator('#line-manager-delete').click();
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(50);
 
   expect(await getLineCount(page)).toBe(0);
   await expect(page.locator('#line-manager')).toHaveClass(/hidden/);
@@ -1110,7 +1115,7 @@ test('line manager shows stop list with correct station names', async ({ page })
   const cy = canvas!.y + canvas!.height / 2;
   await page.mouse.click(cx - 60, cy);
   await page.mouse.click(cx + 60, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   const stopNames = await page.locator('.lm-stop-name').allTextContents();
   expect(stopNames).toHaveLength(2);
@@ -1130,7 +1135,7 @@ test('line manager can reorder stops and updates line geometry', async ({ page }
   await page.mouse.click(cx - 110, cy);
   await page.mouse.click(cx, cy);
   await page.mouse.click(cx + 110, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   const before = await page.evaluate(() => {
     const editor = (window as unknown as {
@@ -1213,7 +1218,7 @@ test('line manager shows end-to-end and between-stop timings for selected rollin
   await page.mouse.click(cx - 100, cy);
   await page.mouse.click(cx, cy);
   await page.mouse.click(cx + 100, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await page.evaluate(() => {
     const editor = (window as unknown as {
@@ -1273,7 +1278,7 @@ test('clicking the end-to-end card opens the journey profile graph', async ({ pa
   await page.mouse.click(cx - 120, cy);
   await page.mouse.click(cx - 20, cy - 30);
   await page.mouse.click(cx + 90, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await page.evaluate(() => {
     const editor = (window as unknown as {
@@ -1320,11 +1325,11 @@ test('clicking a stop in the line manager opens the station manager', async ({ p
 
   const canvas = await page.locator('#map canvas').boundingBox();
   await page.mouse.click(canvas!.x + canvas!.width / 2, canvas!.y + canvas!.height / 2);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   // Click the stop in the line manager
   await page.locator('.lm-stop-item').first().click();
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await expect(page.locator('#station-manager')).not.toHaveClass(/hidden/);
 });
@@ -1342,10 +1347,10 @@ test('when both panels open station manager shifts left of line manager', async 
   const cx = canvas!.x + canvas!.width / 2;
   const cy = canvas!.y + canvas!.height / 2;
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   await page.locator('.lm-stop-item').first().click();
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   // Both panels should be visible
   await expect(page.locator('#line-manager')).not.toHaveClass(/hidden/);
@@ -1365,7 +1370,7 @@ test('line manager shows census data after stops are added', async ({ page }) =>
 
   const canvas = await page.locator('#map canvas').boundingBox();
   await page.mouse.click(canvas!.x + canvas!.width / 2, canvas!.y + canvas!.height / 2);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   // Loading spinner should go away, then either grid or error becomes visible
   await expect(page.locator('#lm-stats-loading')).toBeHidden({ timeout: 30_000 });
@@ -1387,7 +1392,7 @@ test('clicking line badge in station manager opens line manager', async ({ page 
   const cx = canvas!.x + canvas!.width / 2;
   const cy = canvas!.y + canvas!.height / 2;
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   // Close line manager first
   await page.locator('#line-manager-close').click();
@@ -1396,7 +1401,7 @@ test('clicking line badge in station manager opens line manager', async ({ page 
   // Select the station to open Station Manager
   await page.locator('#tool-select').click();
   await page.mouse.click(cx, cy);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
 
   // Click the line badge in SM → should open LM
   await page.locator('#sm-lines-list .sm-line-badge').first().click();
