@@ -65,15 +65,23 @@ Open http://localhost:5173 to view the prototype.
 
 ## Data pipeline
 
-This repository contains tools to process additional UK transport and census data.
+The `public/data/` folder is **not committed** — regenerate it locally before running the dev server.
 
-- `npm run census` — run `tools/census_processor.py`
-- `npm run geography` — run `tools/geography_processor.py --merge-census`
-- `npm run naptan` — run `tools/naptan_processor.py`
-- `npm run rail-lines` — run `tools/rail_lines_processor.py`
-- `npm run census-merge` — run `npm run census && npm run geography`
+```bash
+npm run generate-data
+```
 
-The `public/data/` folder holds preprocessed boundary data used by the census overlay.
+This runs all processors in sequence:
+
+| Script | Tool | Output |
+|---|---|---|
+| `npm run census` | `tools/census_processor.py` | LSOA/MSOA census JSON |
+| `npm run geography` | `tools/geography_processor.py` | LSOA/MSOA boundary GeoJSON |
+| `npm run naptan` | `tools/naptan_processor.py` | `stations.geojson` |
+| `npm run rail-lines` | `tools/rail_lines_processor.py` | `rail_lines.geojson` |
+| `npm run signals` | `tools/signal_processor.py` | `signals.geojson` |
+
+All data is fetched from OpenStreetMap (Overpass API) and ONS. A full run takes 5–15 minutes depending on Overpass load. The `uk-mask.geojson` file is small and remains committed.
 
 ## Production build
 
