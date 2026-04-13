@@ -1430,7 +1430,7 @@ function buildDebug(
     header: style === 'lu' ? 'roundel' : style === 'paris' ? 'metro-placard' : 'route-bullets',
     decorationKinds:
       style === 'lu'
-        ? ['roundel', 'river-band', 'grid', 'zone-bands']
+        ? ['roundel', 'river-band']
         : style === 'paris'
           ? ['metro-placard', 'water-band', 'park-block']
           : ['route-bullets', 'water-band', 'park-block'],
@@ -1710,66 +1710,6 @@ function buildExportHTML(doc: ExportDocument, options: BuildHtmlOptions = {}): s
     }
   }
 
-  function renderLUGrid() {
-    var rect = DOC.contentRect;
-    var gridSize = 110;
-    var cols = Math.max(3, Math.floor(rect.width / gridSize));
-    var rows = Math.max(3, Math.floor(rect.height / gridSize));
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(rect.x, rect.y, rect.width, rect.height);
-    ctx.clip();
-
-    ctx.fillStyle = hexToRgba('#6B7487', 0.12);
-    for (var band = -2; band < 8; band++) {
-      var startX = rect.x + band * gridSize * 1.45;
-      ctx.beginPath();
-      ctx.moveTo(startX, rect.y + rect.height);
-      ctx.lineTo(startX + gridSize * 0.82, rect.y + rect.height);
-      ctx.lineTo(startX + gridSize * 2.65, rect.y);
-      ctx.lineTo(startX + gridSize * 1.83, rect.y);
-      ctx.closePath();
-      ctx.fill();
-    }
-
-    ctx.strokeStyle = hexToRgba(THEME.roundelBlue || '#0019A8', 0.2);
-    ctx.lineWidth = 1;
-
-    for (var x = rect.x; x <= rect.x + rect.width + 0.1; x += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(x, rect.y);
-      ctx.lineTo(x, rect.y + rect.height);
-      ctx.stroke();
-    }
-
-    for (var y = rect.y; y <= rect.y + rect.height + 0.1; y += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(rect.x, y);
-      ctx.lineTo(rect.x + rect.width, y);
-      ctx.stroke();
-    }
-
-    ctx.fillStyle = hexToRgba(THEME.stationOutline, 0.13);
-    ctx.font = '700 52px ' + THEME.uiFontFamily;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    for (var row = 0; row < rows; row++) {
-      for (var col = 0; col < cols; col++) {
-        var cx = rect.x + gridSize / 2 + col * gridSize;
-        var cy = rect.y + gridSize / 2 + row * gridSize;
-        var zone = 1 + Math.min(
-          8,
-          Math.round(Math.max(Math.abs(col - (cols - 1) / 2), Math.abs(row - (rows - 1) / 2)))
-        );
-        ctx.fillText(String(zone), cx, cy);
-      }
-    }
-
-    ctx.restore();
-  }
-
   function renderLUBackdrop() {
     var barX = 60;
     var barY = 62;
@@ -1777,8 +1717,6 @@ function buildExportHTML(doc: ExportDocument, options: BuildHtmlOptions = {}): s
     var barH = 30;
     var centerX = 150;
     var centerY = 77;
-
-    renderLUGrid();
 
     ctx.lineWidth = 12;
     ctx.strokeStyle = THEME.roundelRed;
