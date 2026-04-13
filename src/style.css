@@ -42,6 +42,18 @@
   will-change: transform, opacity;
 }
 
+/* Ensure animated surfaces are promoted to their own composite layer for smooth transforms */
+#sim-toolbar,
+#sim-hud,
+.panel,
+.modal,
+.timetable-box {
+  will-change: transform, opacity;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
 html, body {
   width: 100%;
   height: 100%;

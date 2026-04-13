@@ -273,7 +273,7 @@ function setAnimatedVisibility(
   element: HTMLElement,
   visible: boolean,
   options: VisibilityOptions,
-): void {
+): Promise<void> {
   const strategy = options.strategy ?? 'class';
   const hidden = strategy === 'class'
     ? element.classList.contains('hidden')
@@ -281,11 +281,11 @@ function setAnimatedVisibility(
   const state = element.dataset.motionState;
 
   if (visible) {
-    if (state === 'entering' || state === 'open') return;
-    if (!hidden && state !== 'exiting') return;
+    if (state === 'entering' || state === 'open') return Promise.resolve();
+    if (!hidden && state !== 'exiting') return Promise.resolve();
   } else {
-    if (state === 'exiting' || state === 'closed') return;
-    if (hidden && state !== 'entering') return;
+    if (state === 'exiting' || state === 'closed') return Promise.resolve();
+    if (hidden && state !== 'entering') return Promise.resolve();
   }
 
   const activeMotion = activeVisibilityMotions.get(element);
@@ -329,7 +329,7 @@ function setAnimatedVisibility(
   const token = Symbol();
   activeVisibilityMotions.set(element, { token, animations });
 
-  void Promise.allSettled(animations.map((animation) => animation.finished.catch(() => undefined))).then(() => {
+  return Promise.allSettled(animations.map((animation) => animation.finished.catch(() => undefined))).then(() => {
     const currentMotion = activeVisibilityMotions.get(element);
     if (!currentMotion || currentMotion.token !== token) return;
 
@@ -349,23 +349,23 @@ function setAnimatedVisibility(
     }
     element.dataset.motionState = 'closed';
     element.setAttribute('aria-hidden', 'true');
-  });
+  }).then(() => undefined);
 }
 
-function showAnimatedClass(element: HTMLElement, preset: MotionPreset, surfaceSelector?: string): void {
-  setAnimatedVisibility(element, true, { preset, surfaceSelector });
+function showAnimatedClass(element: HTMLElement, preset: MotionPreset, surfaceSelector?: string): Promise<void> {
+  return setAnimatedVisibility(element, true, { preset, surfaceSelector });
 }
 
-function hideAnimatedClass(element: HTMLElement, preset: MotionPreset, surfaceSelector?: string): void {
-  setAnimatedVisibility(element, false, { preset, surfaceSelector });
+function hideAnimatedClass(element: HTMLElement, preset: MotionPreset, surfaceSelector?: string): Promise<void> {
+  return setAnimatedVisibility(element, false, { preset, surfaceSelector });
 }
 
-function showAnimatedDisplay(element: HTMLElement, preset: MotionPreset, displayValue = ''): void {
-  setAnimatedVisibility(element, true, { preset, strategy: 'display', displayValue });
+function showAnimatedDisplay(element: HTMLElement, preset: MotionPreset, displayValue = ''): Promise<void> {
+  return setAnimatedVisibility(element, true, { preset, strategy: 'display', displayValue });
 }
 
-function hideAnimatedDisplay(element: HTMLElement, preset: MotionPreset): void {
-  setAnimatedVisibility(element, false, { preset, strategy: 'display' });
+function hideAnimatedDisplay(element: HTMLElement, preset: MotionPreset): Promise<void> {
+  return setAnimatedVisibility(element, false, { preset, strategy: 'display' });
 }
 
 type FloatingPanelPosition = { left: number; top: number };
@@ -3240,14 +3240,16 @@ map.on('load', () => {
 
   // ── Mode toggle (Plan / Simulate) ──────────────────────────────────────
   let simMode = false;
-  let simModeExitClassTimer = 0;
   const modeBtnPlan = document.getElementById('mode-btn-plan')!;
   const modeBtnSim  = document.getElementById('mode-btn-sim')!;
   const simToolbar  = document.getElementById('sim-toolbar')!;
   const simHud      = document.getElementById('sim-hud')!;
 
-  function setSimMode(active: boolean): void {
-    window.clearTimeout(simModeExitClassTimer);
+  function afterNextPaint(): Promise<void> {
+    return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  }
+
+  async function setSimMode(active: boolean): Promise<void> {
     simMode = active;
     simUiModeActive = active;
     editor.setSimMode(active);
@@ -3258,33 +3260,63 @@ map.on('load', () => {
 
     if (active) {
       document.body.classList.add('sim-mode');
-      showAnimatedClass(simToolbar, 'panel');
-      showAnimatedClass(simHud, 'panel');
+
+      // Allow the class to take effect and flush layout before animating
+      await afterNextPaint();
+
+      // Start entrance animations (don't await here — let them run)
+      void showAnimatedClass(simToolbar, 'panel');
+      void showAnimatedClass(simHud, 'panel');
+
       trainRenderer.setVisible(true);
       signalSystem.setVisible(true);
-      // Auto-start sim if not running
-      if (!sim.isRunning()) {
-        sim.reinit();
-        rebuildTimetable();
-        sim.start();
-        syncPlayBtn();
+
+      // Defer expensive simulation init to after the paint so animations stay smooth
+      const initSim = () => {
+        if (!sim.isRunning()) {
+          sim.reinit();
+          rebuildTimetable();
+          sim.start();
+          syncPlayBtn();
+        }
+        // Camera movement can be expensive; run after a small delay/idle window
+        fitMapToNetwork();
+        syncSimSpeedKeyUi();
+      };
+
+      if ('requestIdleCallback' in window) {
+        try {
+          (window as any).requestIdleCallback(initSim, { timeout: 250 });
+        } catch {
+          setTimeout(initSim, 60);
+        }
+      } else {
+        setTimeout(initSim, 60);
       }
-      // Auto-zoom to fit the network so trains and signals are visible
-      fitMapToNetwork();
-      syncSimSpeedKeyUi();
     } else {
-      hideAnimatedClass(simToolbar, 'panel');
-      hideAnimatedClass(simHud, 'panel');
-      hideAnimatedClass(tdPanel, 'panel');
-      hideAnimatedClass(sigDetailPanel, 'panel');
-      hideAnimatedClass(ttModal, 'modal', '.timetable-box');
+      // Kick off hide animations and wait for them to finish before doing heavy cleanup
+      const hides: Promise<void>[] = [];
+      hides.push(hideAnimatedClass(simToolbar, 'panel'));
+      hides.push(hideAnimatedClass(simHud, 'panel'));
+      hides.push(hideAnimatedClass(tdPanel, 'panel'));
+      hides.push(hideAnimatedClass(sigDetailPanel, 'panel'));
+      hides.push(hideAnimatedClass(ttModal, 'modal', '.timetable-box'));
+
       depBoard.close();
       followedTrainId = null;
       updateFollowedState();
+
+      // await animations, but use a reasonable timeout fallback to avoid locking forever
+      await Promise.race([
+        Promise.allSettled(hides.map((p) => (p as Promise<void>).catch(() => undefined))),
+        new Promise((resolve) => setTimeout(resolve, 300)),
+      ]);
+
       if (sim.isRunning()) {
         sim.stop();
         syncPlayBtn();
       }
+
       // Clear and hide train/signal layers so they don't bleed into plan mode
       trainRenderer.update([], undefined);
       signalSystem.clear();
@@ -3292,9 +3324,8 @@ map.on('load', () => {
       signalSystem.setVisible(false);
       speedHoverTooltipEl?.classList.add('hidden');
       syncSimSpeedKeyUi();
-      simModeExitClassTimer = window.setTimeout(() => {
-        document.body.classList.remove('sim-mode');
-      }, 180);
+
+      document.body.classList.remove('sim-mode');
     }
   }
 

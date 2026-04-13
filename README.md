@@ -28,9 +28,19 @@ This repo is an early stage proof-of-concept for the map and data overlay layer 
 npm install
 ```
 
+### Optional: enable git hooks
+
+This repo uses a local hooks path stored in `.githooks`. Enable it with:
+
+```bash
+npm run setup-hooks
+```
+
+The pre-push hook runs `npm run check-geojson` to validate generated GeoJSON before push.
+
 ### 2. Download UK tile data
 
-This fetches only the UK region (~150–300 MB) from the Protomaps planet file using HTTP range-requests.
+This downloads the latest Protomaps build and extracts only the UK bounding box (~100–300 MB) to `public/tiles/uk.pmtiles` using HTTP range-requests.
 
 ```bash
 npm run download-tiles
@@ -41,9 +51,9 @@ The tile file is saved to `public/tiles/uk.pmtiles`.
 > **Manual alternative** – if the script fails, install the
 > [pmtiles CLI](https://github.com/protomaps/go-pmtiles/releases) and run:
 > ```bash
-> pmtiles extract https://build.protomaps.com/20250401.pmtiles public/tiles/uk.pmtiles --bbox=-10.6,49.8,1.8,60.9
+> pmtiles extract https://build.protomaps.com/<LATEST>.pmtiles public/tiles/uk.pmtiles --bbox=-10.6,49.8,1.8,60.9
 > ```
-> Replace `20250401` with the latest build date.
+> Replace `<LATEST>` with the latest available build key.
 
 ### 3. Start the dev server
 
@@ -65,7 +75,7 @@ Open http://localhost:5173 to view the prototype.
 
 ## Data pipeline
 
-The `public/data/` folder is **not committed** — regenerate it locally before running the dev server.
+Most files in `public/data/` are not committed — only the boundary GeoJSON files (`lsoa_boundaries.geojson` and `msoa_boundaries.geojson`) are tracked. Regenerate the rest locally before running the dev server.
 
 ```bash
 npm run generate-data
@@ -90,6 +100,24 @@ npm run build
 ```
 
 Copy `public/tiles/uk.pmtiles` into the same folder as the generated `dist/` assets.
+
+You can preview the production build locally with:
+
+```bash
+npm run preview
+```
+
+## Testing
+
+End-to-end smoke and feature tests are available via Playwright.
+
+```bash
+npm run test:e2e
+npm run test:e2e:quick
+npm run test:e2e:full
+npm run test:e2e:sharded
+npm run test:e2e:timebox
+```
 
 ## Hosting notes
 
