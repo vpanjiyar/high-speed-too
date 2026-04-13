@@ -23,6 +23,9 @@
     "census-merge": "npm run census && npm run geography",
     "shrink-geojson": "python scripts/simplify_geojson.py public/data/lsoa_boundaries.geojson",
     "generate-data": "npm run census-merge && npm run naptan && npm run rail-lines && npm run signals"
+    ,
+    "check-geojson": "node scripts/check-geojson-size.mjs",
+    "setup-hooks": "git config core.hooksPath .githooks || true"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

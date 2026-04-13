@@ -82,11 +82,20 @@ export class NetworkEditor {
       this._updateCursor();
     });
 
+    this.map.on('mouseenter', 'network-line-hit', () => {
+      if (!this._simMode && this.mode === 'select') {
+        this.map.getCanvas().style.cursor = 'pointer';
+      }
+    });
+    this.map.on('mouseleave', 'network-line-hit', () => {
+      this._updateCursor();
+    });
+
     // Cursor feedback: real-world NaPTAN stations (show pointer when in an
     // active placement mode so the user knows snapping is available)
     for (const layer of NAPTAN_HIT_LAYERS) {
       this.map.on('mouseenter', layer, () => {
-        if (this.mode === 'station' || this.mode === 'line') {
+        if (!this._simMode && (this.mode === 'select' || this.mode === 'station' || this.mode === 'line')) {
           this.map.getCanvas().style.cursor = 'pointer';
         }
       });

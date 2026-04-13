@@ -609,9 +609,10 @@ test('exported network can be re-imported and produces identical station/line da
   fs.unlinkSync(tmpPath);
 
   // Clear the network, then re-import
-  page.on('dialog', (d) => d.accept());
   await page.locator('#tool-clear').click();
-  await page.waitForTimeout(100);
+  await expect(page.locator('#clear-modal')).toBeVisible();
+  await page.locator('#clear-btn-confirm').click();
+  await expect(page.locator('#clear-modal')).toBeHidden();
   expect(await getStationCount(page)).toBe(0);
 
   await page.locator('#import-file-input').setInputFiles({

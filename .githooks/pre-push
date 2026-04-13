@@ -1,0 +1,6 @@
+#!/bin/sh
+# Run geojson size check before pushing. If it fails, abort push.
+npm run check-geojson || {
+  echo "pre-push: GeoJSON size check failed — aborting push"
+  exit 1
+}

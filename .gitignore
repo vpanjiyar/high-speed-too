@@ -19,7 +19,9 @@ scripts/pmtiles.exe
 scripts/pmtiles
 
 # Preprocessed GeoJSON data — regenerate locally with `npm run generate-data`
-public/data/
+public/data/*
+!public/data/lsoa_boundaries.geojson
+!public/data/msoa_boundaries.geojson
 
 # Environment / secrets
 .env

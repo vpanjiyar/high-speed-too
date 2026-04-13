@@ -52,6 +52,73 @@ type ActiveVisibilityMotion = {
 
 const COMPACT_PANEL_BREAKPOINT = 840;
 
+type AttributionSourceInfo = {
+  title: string;
+  usedFor: string;
+  provider: string;
+  terms: string;
+  href: string;
+};
+
+const ATTRIBUTION_SOURCES: AttributionSourceInfo[] = [
+  {
+    title: 'UK PMTiles basemap',
+    usedFor: 'Offline-ready vector basemap tiles for the map itself.',
+    provider: 'Protomaps and OpenStreetMap contributors',
+    terms: 'ODbL / Protomaps terms',
+    href: 'https://protomaps.com',
+  },
+  {
+    title: 'ONS Open Geography boundaries',
+    usedFor: 'LSOA and MSOA polygons for the census choropleths.',
+    provider: 'Office for National Statistics',
+    terms: 'Open Government Licence v3.0',
+    href: 'https://geoportal.statistics.gov.uk/',
+  },
+  {
+    title: 'NOMIS Census 2021 tables',
+    usedFor: 'Population, density, age, commuting, and socioeconomic overlay metrics.',
+    provider: 'NOMIS and ONS',
+    terms: 'Open Government Licence v3.0',
+    href: 'https://www.nomisweb.co.uk/sources/census_2021',
+  },
+  {
+    title: 'OpenStreetMap rail geometry',
+    usedFor: 'National rail line geometry and several processed network overlays.',
+    provider: 'OpenStreetMap contributors via Overpass API',
+    terms: 'ODbL',
+    href: 'https://overpass-api.de/',
+  },
+  {
+    title: 'NaPTAN access nodes',
+    usedFor: 'Station snapping, station import, and real-world stop metadata.',
+    provider: 'Department for Transport',
+    terms: 'Open Government Licence v3.0',
+    href: 'https://naptan.api.dft.gov.uk/v1/access-nodes?dataFormat=csv',
+  },
+  {
+    title: 'MapLibre GL JS',
+    usedFor: 'WebGL rendering, controls, hit-testing, and the main map runtime.',
+    provider: 'MapLibre project',
+    terms: 'BSD',
+    href: 'https://maplibre.org/',
+  },
+  {
+    title: 'PMTiles tooling',
+    usedFor: 'Archive reading, custom protocols, and tile extraction workflows.',
+    provider: 'Protomaps / PMTiles project',
+    terms: 'Project-specific open-source licences',
+    href: 'https://github.com/protomaps/go-pmtiles',
+  },
+  {
+    title: 'Protomaps glyph assets',
+    usedFor: 'Hosted glyph fonts for map labels in the current prototype.',
+    provider: 'Protomaps basemaps-assets',
+    terms: 'Project asset terms',
+    href: 'https://protomaps.github.io/basemaps-assets/',
+  },
+];
+
 type ResizeAxis = 'inline' | 'block' | 'both';
 type ResizeHandleRole = 'corner' | 'edge-inline-start' | 'edge-block-start' | 'edge-block-end';
 type ResizeLayoutMode = 'desktop' | 'mobile';
@@ -206,7 +273,7 @@ function setAnimatedVisibility(
   element: HTMLElement,
   visible: boolean,
   options: VisibilityOptions,
-): void {
+): Promise<void> {
   const strategy = options.strategy ?? 'class';
   const hidden = strategy === 'class'
     ? element.classList.contains('hidden')
@@ -214,11 +281,11 @@ function setAnimatedVisibility(
   const state = element.dataset.motionState;
 
   if (visible) {
-    if (state === 'entering' || state === 'open') return;
-    if (!hidden && state !== 'exiting') return;
+    if (state === 'entering' || state === 'open') return Promise.resolve();
+    if (!hidden && state !== 'exiting') return Promise.resolve();
   } else {
-    if (state === 'exiting' || state === 'closed') return;
-    if (hidden && state !== 'entering') return;
+    if (state === 'exiting' || state === 'closed') return Promise.resolve();
+    if (hidden && state !== 'entering') return Promise.resolve();
   }
 
   const activeMotion = activeVisibilityMotions.get(element);
@@ -240,6 +307,31 @@ function setAnimatedVisibility(
   element.style.pointerEvents = 'none';
 
   const motion = getVisibilityMotion(options.preset, visible);
+  // Preserve horizontal centering for elements that use `left:50%` + `translateX(-50%)`
+  // (notably the simulation toolbar) by injecting the centering translate into
+  // the animation keyframes so the element doesn't visually snap from the
+  // left/right during the animation.
+  if (element.id === 'sim-toolbar') {
+    const addCenter = (kfs: Keyframe[] | undefined) => {
+      if (!kfs) return kfs;
+      return kfs.map((kf) => {
+        const copy: Keyframe = { ...kf };
+        if (typeof copy.transform === 'string') {
+          copy.transform = `translateX(-50%) ${copy.transform}`;
+        } else {
+          copy.transform = 'translateX(-50%)';
+        }
+        return copy;
+      });
+    };
+
+    const centeredRoot = addCenter(motion.root);
+    if (centeredRoot) motion.root = centeredRoot;
+    if (motion.surface) {
+      const centeredSurface = addCenter(motion.surface);
+      if (centeredSurface) motion.surface = centeredSurface;
+    }
+  }
   const animations: Animation[] = [
     element.animate(motion.root, {
       duration: motion.duration,
@@ -262,7 +354,7 @@ function setAnimatedVisibility(
   const token = Symbol();
   activeVisibilityMotions.set(element, { token, animations });
 
-  void Promise.allSettled(animations.map((animation) => animation.finished.catch(() => undefined))).then(() => {
+  return Promise.allSettled(animations.map((animation) => animation.finished.catch(() => undefined))).then(() => {
     const currentMotion = activeVisibilityMotions.get(element);
     if (!currentMotion || currentMotion.token !== token) return;
 
@@ -282,23 +374,23 @@ function setAnimatedVisibility(
     }
     element.dataset.motionState = 'closed';
     element.setAttribute('aria-hidden', 'true');
-  });
+  }).then(() => undefined);
 }
 
-function showAnimatedClass(element: HTMLElement, preset: MotionPreset, surfaceSelector?: string): void {
-  setAnimatedVisibility(element, true, { preset, surfaceSelector });
+function showAnimatedClass(element: HTMLElement, preset: MotionPreset, surfaceSelector?: string): Promise<void> {
+  return setAnimatedVisibility(element, true, { preset, surfaceSelector });
 }
 
-function hideAnimatedClass(element: HTMLElement, preset: MotionPreset, surfaceSelector?: string): void {
-  setAnimatedVisibility(element, false, { preset, surfaceSelector });
+function hideAnimatedClass(element: HTMLElement, preset: MotionPreset, surfaceSelector?: string): Promise<void> {
+  return setAnimatedVisibility(element, false, { preset, surfaceSelector });
 }
 
-function showAnimatedDisplay(element: HTMLElement, preset: MotionPreset, displayValue = ''): void {
-  setAnimatedVisibility(element, true, { preset, strategy: 'display', displayValue });
+function showAnimatedDisplay(element: HTMLElement, preset: MotionPreset, displayValue = ''): Promise<void> {
+  return setAnimatedVisibility(element, true, { preset, strategy: 'display', displayValue });
 }
 
-function hideAnimatedDisplay(element: HTMLElement, preset: MotionPreset): void {
-  setAnimatedVisibility(element, false, { preset, strategy: 'display' });
+function hideAnimatedDisplay(element: HTMLElement, preset: MotionPreset): Promise<void> {
+  return setAnimatedVisibility(element, false, { preset, strategy: 'display' });
 }
 
 type FloatingPanelPosition = { left: number; top: number };
@@ -475,7 +567,7 @@ const map = new maplibregl.Map({
   zoom: 5.5,
   minZoom: 4.5,
   maxZoom: 20,
-  attributionControl: false, // we add our own compact one at bottom-left below
+  attributionControl: false, // handled by the custom credits popup beside nav controls
   // Bounds tightly wrap the British Isles region:
   // West: 11°W  — clear of the western coast of Ireland
   // East: 4°E   — into the southern North Sea (excludes Netherlands coast)
@@ -494,15 +586,118 @@ map.on('error', (e) => {
   _w['__mapState'] = 'error:' + (e as { error?: { message?: string } }).error?.message;
 });
 
-map.addControl(
-  new maplibregl.NavigationControl({ showCompass: true, visualizePitch: false }),
-  'bottom-right',
-);
+const navigationControl = new maplibregl.NavigationControl({ showCompass: true, visualizePitch: false });
+map.addControl(navigationControl, 'bottom-right');
 map.addControl(
   new maplibregl.ScaleControl({ maxWidth: 160, unit: 'metric' }),
   'bottom-right',
 );
-map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left');
+
+const attributionPopoverEl = document.getElementById('attribution-popover') as HTMLElement;
+const attributionPopoverListEl = document.getElementById('attribution-popover-list') as HTMLElement;
+const attributionPopoverCloseBtn = document.getElementById('attribution-popover-close') as HTMLButtonElement;
+
+function renderAttributionSources(): void {
+  attributionPopoverListEl.innerHTML = '';
+  ATTRIBUTION_SOURCES.forEach((source) => {
+    const card = document.createElement('section');
+    card.className = 'attribution-source-card';
+
+    const title = document.createElement('div');
+    title.className = 'attribution-source-title';
+    title.textContent = source.title;
+
+    const meta = document.createElement('div');
+    meta.className = 'attribution-source-meta';
+    meta.innerHTML = `<strong>Used for:</strong> ${source.usedFor}<br/><strong>Provider:</strong> ${source.provider}<br/><strong>Terms:</strong> ${source.terms}`;
+
+    const link = document.createElement('a');
+    link.className = 'attribution-source-link';
+    link.href = source.href;
+    link.target = '_blank';
+    link.rel = 'noreferrer noopener';
+    link.textContent = 'Learn more';
+
+    card.append(title, meta, link);
+    attributionPopoverListEl.appendChild(card);
+  });
+}
+
+renderAttributionSources();
+
+const attributionTriggerBtn = document.createElement('button');
+attributionTriggerBtn.type = 'button';
+attributionTriggerBtn.className = 'ctrl-attribution-trigger';
+attributionTriggerBtn.title = 'Credits and acknowledgements';
+attributionTriggerBtn.setAttribute('aria-label', 'Open credits and acknowledgements');
+attributionTriggerBtn.textContent = 'Credits';
+
+// Credits lives in its own small ctrl-group capsule, positioned next to the nav controls
+const creditsGroup = document.createElement('div');
+creditsGroup.id = 'credits-btn';
+creditsGroup.className = 'maplibregl-ctrl-group';
+creditsGroup.appendChild(attributionTriggerBtn);
+document.getElementById('ui')?.appendChild(creditsGroup);
+
+function isAttributionPopoverOpen(): boolean {
+  return !attributionPopoverEl.classList.contains('hidden') && attributionPopoverEl.dataset.motionState !== 'closed';
+}
+
+function positionAttributionPopover(): void {
+  if (window.innerWidth <= COMPACT_PANEL_BREAKPOINT) {
+    attributionPopoverEl.style.left = '12px';
+    attributionPopoverEl.style.top = `${Math.max(18, Math.round((window.innerHeight - attributionPopoverEl.offsetHeight) / 2))}px`;
+    return;
+  }
+
+  const triggerRect = attributionTriggerBtn.getBoundingClientRect();
+  const popoverWidth = attributionPopoverEl.offsetWidth;
+  const popoverHeight = attributionPopoverEl.offsetHeight;
+  const minInset = 12;
+  const maxLeft = Math.max(minInset, window.innerWidth - popoverWidth - minInset);
+  const maxTop = Math.max(minInset, window.innerHeight - popoverHeight - minInset);
+  const left = Math.min(maxLeft, Math.max(minInset, Math.round(triggerRect.right - popoverWidth)));
+  const top = Math.min(maxTop, Math.max(minInset, Math.round(triggerRect.top - popoverHeight - 12)));
+
+  attributionPopoverEl.style.left = `${left}px`;
+  attributionPopoverEl.style.top = `${top}px`;
+}
+
+function openAttributionPopover(): void {
+  positionAttributionPopover();
+  showAnimatedClass(attributionPopoverEl, 'panel');
+  window.requestAnimationFrame(positionAttributionPopover);
+}
+
+function closeAttributionPopover(): void {
+  hideAnimatedClass(attributionPopoverEl, 'panel');
+}
+
+attributionTriggerBtn.addEventListener('click', (event) => {
+  event.stopPropagation();
+  if (isAttributionPopoverOpen()) {
+    closeAttributionPopover();
+    return;
+  }
+  openAttributionPopover();
+});
+
+attributionPopoverCloseBtn.addEventListener('click', () => {
+  closeAttributionPopover();
+});
+
+document.addEventListener('mousedown', (event) => {
+  const target = event.target as Node | null;
+  if (!target || !isAttributionPopoverOpen()) return;
+  if (attributionPopoverEl.contains(target) || attributionTriggerBtn.contains(target)) return;
+  closeAttributionPopover();
+});
+
+window.addEventListener('resize', () => {
+  if (isAttributionPopoverOpen()) {
+    positionAttributionPopover();
+  }
+});
 
 // Show a warning banner if the PMTiles file is missing
 map.on('error', (e) => {
@@ -571,6 +766,7 @@ map.on('load', () => {
   const simSpeedLegendEl = document.getElementById('sim-speed-legend');
   let trackSpeedOverlayEnabled = speedToggle?.checked ?? false;
   let simSpeedKeyVisible = false;
+  let simUiModeActive = false;
 
   /** Set the speed layer visibility directly on the map (both national + network layers). */
   const applySpeedLayerVisibility = (visible: boolean): void => {
@@ -583,9 +779,15 @@ map.on('load', () => {
   };
 
   const syncSimSpeedKeyUi = (): void => {
-    const inSimMode = document.body.classList.contains('sim-mode');
+    const inSimMode = simUiModeActive;
     const simActive = inSimMode && simSpeedKeyVisible;
-    simSpeedLegendEl?.classList.toggle('hidden', !simActive);
+    if (simSpeedLegendEl) {
+      if (simActive) {
+        showAnimatedClass(simSpeedLegendEl, 'section');
+      } else {
+        hideAnimatedClass(simSpeedLegendEl, 'section');
+      }
+    }
     simSpeedKeyBtn?.classList.toggle('sim-btn--active', simActive);
     // In sim mode layers follow the sim toggle; in plan mode they follow the overlay checkbox
     applySpeedLayerVisibility(inSimMode ? simSpeedKeyVisible : trackSpeedOverlayEnabled);
@@ -598,7 +800,13 @@ map.on('load', () => {
 
   const setTrackSpeedOverlayVisible = (enabled: boolean): void => {
     trackSpeedOverlayEnabled = enabled;
-    speedLegend?.classList.toggle('hidden', !enabled);
+    if (speedLegend) {
+      if (enabled) {
+        showAnimatedClass(speedLegend, 'section');
+      } else {
+        hideAnimatedClass(speedLegend, 'section');
+      }
+    }
     speedHoverTooltipEl?.classList.add('hidden');
     syncSimSpeedKeyUi();
   };
@@ -689,24 +897,39 @@ map.on('load', () => {
 
   // ── View toggle (Detailed / Schematic) ─────────────────────────────────
   let schematicMode = false;
-  const btnDetailed   = document.getElementById('view-btn-detailed')!;
-  const btnSchematic  = document.getElementById('view-btn-schematic')!;
+  const btnDetailed = document.getElementById('view-btn-detailed') as HTMLButtonElement;
+  const btnSchematic = document.getElementById('view-btn-schematic') as HTMLButtonElement;
+  const simBtnDetailed = document.getElementById('sim-view-btn-detailed') as HTMLButtonElement | null;
+  const simBtnSchematic = document.getElementById('sim-view-btn-schematic') as HTMLButtonElement | null;
 
-  btnSchematic.addEventListener('click', () => {
-    if (schematicMode) return;
-    schematicMode = true;
-    applySchematicMode(map, true);
-    btnSchematic.classList.add('view-btn--active');
-    btnDetailed.classList.remove('view-btn--active');
-  });
+  const syncViewModeButtons = (): void => {
+    [btnDetailed, simBtnDetailed].forEach((button) => {
+      button?.classList.toggle('view-btn--active', !schematicMode);
+      button?.setAttribute('aria-pressed', String(!schematicMode));
+    });
 
-  btnDetailed.addEventListener('click', () => {
-    if (!schematicMode) return;
-    schematicMode = false;
-    applySchematicMode(map, false);
-    btnDetailed.classList.add('view-btn--active');
-    btnSchematic.classList.remove('view-btn--active');
-  });
+    [btnSchematic, simBtnSchematic].forEach((button) => {
+      button?.classList.toggle('view-btn--active', schematicMode);
+      button?.setAttribute('aria-pressed', String(schematicMode));
+    });
+  };
+
+  const setSchematicView = (nextMode: boolean): void => {
+    if (schematicMode === nextMode) {
+      syncViewModeButtons();
+      return;
+    }
+
+    schematicMode = nextMode;
+    applySchematicMode(map, schematicMode);
+    syncViewModeButtons();
+  };
+
+  btnSchematic.addEventListener('click', () => setSchematicView(true));
+  btnDetailed.addEventListener('click', () => setSchematicView(false));
+  simBtnSchematic?.addEventListener('click', () => setSchematicView(true));
+  simBtnDetailed?.addEventListener('click', () => setSchematicView(false));
+  syncViewModeButtons();
 
   // ── Network editor ──────────────────────────────────────────────────────
   //
@@ -719,9 +942,12 @@ map.on('load', () => {
   let editor!: NetworkEditor;
 
   // ── Panel element references ────────────────────────────────────────────
+  const overlaysPanelEl = document.getElementById('overlays-panel')!;
+  const overlaysPanelToggleBtn = document.getElementById('overlays-panel-toggle') as HTMLButtonElement;
   const smEl = document.getElementById('station-manager')!;
   const lmEl = document.getElementById('line-manager')!;
   const linePanelEl = document.getElementById('line-panel')!;
+  const clearModalEl = document.getElementById('clear-modal')!;
   const trainPickerModalEl = document.getElementById('train-picker-modal')!;
   const importModalEl = document.getElementById('import-modal')!;
   const journeyProfileModalEl = document.getElementById('journey-profile-modal')!;
@@ -934,7 +1160,7 @@ map.on('load', () => {
   setupResizablePanel({
     storageKey: 'overlays-panel',
     label: 'Overlays panel',
-    element: document.getElementById('overlays-panel') as HTMLElement,
+    element: overlaysPanelEl,
     inlineCssVar: '--overlays-width',
     blockCssVar: '--overlays-height',
     desktop: {
@@ -955,6 +1181,34 @@ map.on('load', () => {
       defaultBlock: 320,
     },
   });
+
+  let overlaysCollapsed = false;
+
+  const applyOverlaysCollapsed = (collapsed: boolean): void => {
+    overlaysCollapsed = collapsed;
+    overlaysPanelEl.classList.toggle('overlays-panel--collapsed', collapsed);
+    overlaysPanelToggleBtn.setAttribute('aria-expanded', String(!collapsed));
+    overlaysPanelToggleBtn.title = collapsed ? 'Expand overlays' : 'Collapse overlays';
+    overlaysPanelToggleBtn.setAttribute('aria-label', collapsed ? 'Expand overlays panel' : 'Collapse overlays panel');
+
+    try {
+      window.localStorage.setItem('hst.panel.overlays.collapsed', collapsed ? '1' : '0');
+    } catch {
+      // Ignore storage failures; the panel should still collapse for the session.
+    }
+  };
+
+  overlaysPanelToggleBtn.addEventListener('click', () => {
+    if (simMode) return; // ignore toggle while in simulate mode
+    applyOverlaysCollapsed(!overlaysCollapsed);
+  });
+
+  try {
+    overlaysCollapsed = window.localStorage.getItem('hst.panel.overlays.collapsed') === '1';
+  } catch {
+    overlaysCollapsed = false;
+  }
+  applyOverlaysCollapsed(overlaysCollapsed);
 
   setupResizablePanel({
     storageKey: 'line-panel',
@@ -2472,14 +2726,28 @@ map.on('load', () => {
     hideAnimatedClass(linePanelEl, 'panel');
   });
 
+  const closeClearModal = (): void => {
+    hideAnimatedClass(clearModalEl, 'modal', '.clear-modal-box');
+  };
+
+  document.getElementById('clear-btn-cancel')!.addEventListener('click', closeClearModal);
+  document.getElementById('clear-btn-confirm')!.addEventListener('click', () => {
+    closeClearModal();
+    closeLineManager();
+    closeStationManager();
+    editor.clearNetwork();
+  });
+
+  clearModalEl.addEventListener('click', (event) => {
+    if (event.target === event.currentTarget) {
+      closeClearModal();
+    }
+  });
+
   // Clear button
   document.getElementById('tool-clear')!.addEventListener('click', () => {
     if (editor.network.stations.length === 0 && editor.network.lines.length === 0) return;
-    if (confirm('Clear the entire network?')) {
-      closeLineManager();
-      closeStationManager();
-      editor.clearNetwork();
-    }
+    showAnimatedClass(clearModalEl, 'modal', '.clear-modal-box');
   });
 
   // Line panel close
@@ -2715,6 +2983,16 @@ map.on('load', () => {
   document.getElementById('btn-redo')!.addEventListener('click', () => { animateHistoryBtn('btn-redo'); editor.redo(); });
 
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isAttributionPopoverOpen()) {
+      closeAttributionPopover();
+      return;
+    }
+
+    if (e.key === 'Escape' && !clearModalEl.classList.contains('hidden')) {
+      closeClearModal();
+      return;
+    }
+
     if (e.key === 'Escape' && !journeyProfileModalEl.classList.contains('hidden')) {
       closeJourneyProfileModal();
       return;
@@ -2997,41 +3275,106 @@ map.on('load', () => {
   const simToolbar  = document.getElementById('sim-toolbar')!;
   const simHud      = document.getElementById('sim-hud')!;
 
-  function setSimMode(active: boolean): void {
+  function afterNextPaint(): Promise<void> {
+    return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  }
+
+  function hideElementImmediately(element: HTMLElement, strategy: VisibilityStrategy = 'class'): void {
+    const activeMotion = activeVisibilityMotions.get(element);
+    if (activeMotion) {
+      activeMotion.animations.forEach((a) => a.cancel());
+      activeVisibilityMotions.delete(element);
+    }
+
+    if (strategy === 'class') {
+      element.classList.add('hidden');
+    } else {
+      element.style.display = 'none';
+    }
+    element.dataset.motionState = 'closed';
+    element.setAttribute('aria-hidden', 'true');
+    element.style.pointerEvents = '';
+  }
+
+  async function setSimMode(active: boolean): Promise<void> {
     simMode = active;
+    simUiModeActive = active;
     editor.setSimMode(active);
     map.getCanvas().style.cursor = '';
-    document.body.classList.toggle('sim-mode', active);
     modeBtnPlan.classList.toggle('mode-btn--active', !active);
     modeBtnSim.classList.toggle('mode-btn--active', active);
+    closeAttributionPopover();
 
     if (active) {
-      simToolbar.classList.remove('hidden');
-      simHud.classList.remove('hidden');
+      document.body.classList.add('sim-mode');
+
+      // Allow the class to take effect and flush layout before animating
+      await afterNextPaint();
+
+      // Immediately hide overlays panel so it never appears in the sim UI
+      hideElementImmediately(overlaysPanelEl);
+      // Disable the toggle so the user cannot expand overlays while simulating
+      try {
+        overlaysPanelToggleBtn.disabled = true;
+        overlaysPanelToggleBtn.setAttribute('aria-hidden', 'true');
+        overlaysPanelToggleBtn.style.visibility = 'hidden';
+      } catch {
+        // ignore if toggle button missing
+      }
+
+      // Start entrance animations (don't await here — let them run)
+      void showAnimatedClass(simToolbar, 'panel');
+      void showAnimatedClass(simHud, 'panel');
+
       trainRenderer.setVisible(true);
       signalSystem.setVisible(true);
-      // Auto-start sim if not running
-      if (!sim.isRunning()) {
-        sim.reinit();
-        rebuildTimetable();
-        sim.start();
-        syncPlayBtn();
+
+      // Defer expensive simulation init to after the paint so animations stay smooth
+      const initSim = () => {
+        if (!sim.isRunning()) {
+          sim.reinit();
+          rebuildTimetable();
+          sim.start();
+          syncPlayBtn();
+        }
+        // Camera movement can be expensive; run after a small delay/idle window
+        fitMapToNetwork();
+        syncSimSpeedKeyUi();
+      };
+
+      if ('requestIdleCallback' in window) {
+        try {
+          (window as any).requestIdleCallback(initSim, { timeout: 250 });
+        } catch {
+          setTimeout(initSim, 60);
+        }
+      } else {
+        setTimeout(initSim, 60);
       }
-      // Auto-zoom to fit the network so trains and signals are visible
-      fitMapToNetwork();
-      syncSimSpeedKeyUi();
     } else {
-      simToolbar.classList.add('hidden');
-      simHud.classList.add('hidden');
-      tdPanel.classList.add('hidden');
-      sigDetailPanel.classList.add('hidden');
+      // Kick off hide animations and wait for them to finish before doing heavy cleanup
+      const hides: Promise<void>[] = [];
+      hides.push(hideAnimatedClass(simToolbar, 'panel'));
+      hides.push(hideAnimatedClass(simHud, 'panel'));
+      hides.push(hideAnimatedClass(tdPanel, 'panel'));
+      hides.push(hideAnimatedClass(sigDetailPanel, 'panel'));
+      hides.push(hideAnimatedClass(ttModal, 'modal', '.timetable-box'));
+
       depBoard.close();
       followedTrainId = null;
       updateFollowedState();
+
+      // await animations, but use a reasonable timeout fallback to avoid locking forever
+      await Promise.race([
+        Promise.allSettled(hides.map((p) => (p as Promise<void>).catch(() => undefined))),
+        new Promise((resolve) => setTimeout(resolve, 300)),
+      ]);
+
       if (sim.isRunning()) {
         sim.stop();
         syncPlayBtn();
       }
+
       // Clear and hide train/signal layers so they don't bleed into plan mode
       trainRenderer.update([], undefined);
       signalSystem.clear();
@@ -3039,6 +3382,19 @@ map.on('load', () => {
       signalSystem.setVisible(false);
       speedHoverTooltipEl?.classList.add('hidden');
       syncSimSpeedKeyUi();
+
+      // Remove sim-mode first so plan UI is visible, then animate overlays in
+      document.body.classList.remove('sim-mode');
+      // allow paint then show overlays with animation and re-enable toggle
+      await afterNextPaint();
+      try {
+        overlaysPanelToggleBtn.disabled = false;
+        overlaysPanelToggleBtn.removeAttribute('aria-hidden');
+        overlaysPanelToggleBtn.style.visibility = '';
+      } catch {
+        // ignore if toggle button missing
+      }
+      void showAnimatedClass(overlaysPanelEl, 'panel');
     }
   }
 
@@ -3210,7 +3566,7 @@ map.on('load', () => {
   document.getElementById('train-detail-close')!.addEventListener('click', () => {
     followedTrainId = null;
     updateFollowedState();
-    tdPanel.classList.add('hidden');
+    hideAnimatedClass(tdPanel, 'panel');
   });
 
   function openTrainDetail(train: TrainState): void {
@@ -3220,7 +3576,7 @@ map.on('load', () => {
     tdStock.textContent = `${train.rollingStockName} · ${train.carsPerUnit} cars`;
     tdHeadcode.textContent = train.headcode;
     tdServiceDesc.textContent = train.serviceDescription;
-    tdPanel.classList.remove('hidden');
+    showAnimatedClass(tdPanel, 'panel');
     ensureFloatingPanelInViewport('train-detail-panel', tdPanel);
     updateTrainDetail(train);
   }
@@ -3646,7 +4002,7 @@ map.on('load', () => {
 
   document.getElementById('signal-detail-close')!.addEventListener('click', () => {
     delete sigDetailPanel.dataset.signalId;
-    sigDetailPanel.classList.add('hidden');
+    hideAnimatedClass(sigDetailPanel, 'panel');
   });
 
   function openSignalDetail(info: SignalInfo): void {
@@ -3706,7 +4062,7 @@ map.on('load', () => {
       <text x="18" y="65" text-anchor="middle" fill="#aaa" font-size="11">${dirArrow}</text>
     </svg>`;
 
-    sigDetailPanel.classList.remove('hidden');
+    showAnimatedClass(sigDetailPanel, 'panel');
     ensureFloatingPanelInViewport('signal-detail-panel', sigDetailPanel);
   }
 
@@ -3825,7 +4181,7 @@ map.on('load', () => {
       } else {
         followedTrainId = null;
         updateFollowedState();
-        tdPanel.classList.add('hidden');
+        hideAnimatedClass(tdPanel, 'panel');
       }
     }
   });
@@ -4057,15 +4413,21 @@ map.on('load', () => {
   document.getElementById('sim-btn-timetable')!.addEventListener('click', () => {
     rebuildTimetable();
     renderTimetableTabs();
-    ttModal.classList.remove('hidden');
+    showAnimatedClass(ttModal, 'modal', '.timetable-box');
   });
 
   document.getElementById('timetable-close')!.addEventListener('click', () => {
-    ttModal.classList.add('hidden');
+    hideAnimatedClass(ttModal, 'modal', '.timetable-box');
   });
 
   ttModal.addEventListener('click', (e) => {
-    if (e.target === e.currentTarget) ttModal.classList.add('hidden');
+    if (e.target === e.currentTarget) hideAnimatedClass(ttModal, 'modal', '.timetable-box');
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !ttModal.classList.contains('hidden')) {
+      hideAnimatedClass(ttModal, 'modal', '.timetable-box');
+    }
   });
 
   function renderTimetableTabs(): void {
