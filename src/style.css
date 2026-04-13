@@ -524,11 +524,26 @@ body.panel-resizing * {
   color: #1a1a2e !important;
 }
 
-.maplibregl-ctrl-group .ctrl-attribution-trigger {
-  width: 34px;
+.ctrl-attribution-trigger {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
+  padding: 0 9px !important;
+}
+
+/* Credits — own capsule, sits to the left of the nav controls */
+#credits-btn {
+  position: absolute;
+  bottom: 12px;
+  right: 113px;
+  pointer-events: auto;
+  margin: 0 !important;
+}
+
+#credits-btn .ctrl-attribution-trigger {
+  width: auto !important;
+  height: 29px;
+  padding: 0 9px;
 }
 
 .maplibregl-ctrl-group button:hover {
@@ -552,7 +567,7 @@ body.panel-resizing * {
 #zoom-links {
   pointer-events: auto;
   position: absolute;
-  bottom: 128px;
+  bottom: 85px;
   right: 16px;
   display: flex;
   align-items: center;
@@ -2157,7 +2172,12 @@ body.panel-resizing * {
 
   #zoom-links {
     right: 12px;
-    bottom: calc(var(--mobile-toolbar-offset) + 52px);
+    bottom: calc(var(--mobile-toolbar-offset) + 83px);
+  }
+
+  #credits-btn {
+    right: 109px;
+    bottom: calc(var(--mobile-toolbar-offset) + 10px);
   }
 
   .maplibregl-ctrl-group {
@@ -4483,6 +4503,10 @@ body.sim-mode .maplibregl-ctrl-group {
 
 body.sim-mode .maplibregl-ctrl-group button {
   color: rgba(255, 252, 244, 0.78) !important;
+}
+
+body.sim-mode .maplibregl-ctrl-group .maplibregl-ctrl-icon {
+  filter: invert(1) brightness(0.88);
 }
 
 body.sim-mode .maplibregl-ctrl-group button:hover {

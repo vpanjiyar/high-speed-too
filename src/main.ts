@@ -628,12 +628,16 @@ renderAttributionSources();
 const attributionTriggerBtn = document.createElement('button');
 attributionTriggerBtn.type = 'button';
 attributionTriggerBtn.className = 'ctrl-attribution-trigger';
-attributionTriggerBtn.title = 'Sources and acknowledgements';
-attributionTriggerBtn.setAttribute('aria-label', 'Open sources and acknowledgements');
-attributionTriggerBtn.textContent = 'Src';
+attributionTriggerBtn.title = 'Credits and acknowledgements';
+attributionTriggerBtn.setAttribute('aria-label', 'Open credits and acknowledgements');
+attributionTriggerBtn.textContent = 'Credits';
 
-const navControlGroup = map.getContainer().querySelector('.maplibregl-ctrl-bottom-right .maplibregl-ctrl-group');
-navControlGroup?.appendChild(attributionTriggerBtn);
+// Credits lives in its own small ctrl-group capsule, positioned next to the nav controls
+const creditsGroup = document.createElement('div');
+creditsGroup.id = 'credits-btn';
+creditsGroup.className = 'maplibregl-ctrl-group';
+creditsGroup.appendChild(attributionTriggerBtn);
+document.getElementById('ui')?.appendChild(creditsGroup);
 
 function isAttributionPopoverOpen(): boolean {
   return !attributionPopoverEl.classList.contains('hidden') && attributionPopoverEl.dataset.motionState !== 'closed';
