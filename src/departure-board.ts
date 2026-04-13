@@ -47,6 +47,7 @@ export class DepartureBoard {
   private mode: 'simulated' | 'live' = 'simulated';
   private filter: 'both' | 'dep' | 'arr' = 'both';
   private livePollTimer: ReturnType<typeof setInterval> | null = null;
+  private activeVisibilityMotion: { token: symbol; animations: Animation[] } | null = null;
 
   constructor() {
     this.el         = document.getElementById('departure-board')!;
@@ -77,14 +78,14 @@ export class DepartureBoard {
     // Try to resolve CRS from raw code (might be a TIPLOC from ATCO)
     this.stationCrs = crs ? (tiploc2Crs(crs) || crs) : null;
     this.nameEl.textContent = stationName;
-    this.el.classList.remove('hidden');
+    this._setAnimatedVisibility(true);
     this.setMode(this.mode); // refresh badge/buttons
   }
 
   close(): void {
     this.stationId = null;
     this.stationCrs = null;
-    this.el.classList.add('hidden');
+    this._setAnimatedVisibility(false);
     this.rowsEl.innerHTML = '';
     this._stopLivePoll();
   }
@@ -113,6 +114,71 @@ export class DepartureBoard {
     this.filterBtnBoth.classList.toggle('db-mode-btn--active', this.filter === 'both');
     this.filterBtnDep.classList.toggle('db-mode-btn--active', this.filter === 'dep');
     this.filterBtnArr.classList.toggle('db-mode-btn--active', this.filter === 'arr');
+  }
+
+  private _setAnimatedVisibility(visible: boolean): void {
+    const hidden = this.el.classList.contains('hidden');
+    const state = this.el.dataset.motionState;
+
+    if (visible) {
+      if (state === 'entering' || state === 'open') return;
+      if (!hidden && state !== 'exiting') return;
+    } else {
+      if (state === 'exiting' || state === 'closed') return;
+      if (hidden && state !== 'entering') return;
+    }
+
+    if (this.activeVisibilityMotion) {
+      this.activeVisibilityMotion.animations.forEach((animation) => animation.cancel());
+      this.activeVisibilityMotion = null;
+    }
+
+    if (visible) {
+      this.el.classList.remove('hidden');
+      this.el.setAttribute('aria-hidden', 'false');
+    }
+
+    this.el.dataset.motionState = visible ? 'entering' : 'exiting';
+    this.el.style.pointerEvents = 'none';
+
+    const animation = this.el.animate(
+      visible
+        ? [
+            { opacity: 0, transform: 'translateY(20px) scale(0.96)' },
+            { opacity: 1, transform: 'translateY(-4px) scale(1.01)', offset: 0.72 },
+            { opacity: 1, transform: 'translateY(0) scale(1)' },
+          ]
+        : [
+            { opacity: 1, transform: 'translateY(0) scale(1)' },
+            { opacity: 0.78, transform: 'translateY(6px) scale(0.985)', offset: 0.45 },
+            { opacity: 0, transform: 'translateY(18px) scale(0.95)' },
+          ],
+      {
+        duration: visible ? 220 : 150,
+        easing: visible ? 'cubic-bezier(0.22, 1.24, 0.36, 1)' : 'cubic-bezier(0.4, 0, 0.2, 1)',
+        fill: 'both',
+      },
+    );
+
+    const token = Symbol();
+    this.activeVisibilityMotion = { token, animations: [animation] };
+
+    void animation.finished.catch(() => undefined).then(() => {
+      if (!this.activeVisibilityMotion || this.activeVisibilityMotion.token !== token) return;
+
+      animation.cancel();
+      this.activeVisibilityMotion = null;
+      this.el.style.pointerEvents = '';
+
+      if (visible) {
+        this.el.dataset.motionState = 'open';
+        return;
+      }
+
+      this.el.classList.add('hidden');
+      this.el.dataset.motionState = 'closed';
+      this.el.setAttribute('aria-hidden', 'true');
+    });
   }
 
   /** Refresh the board from current simulation state. Call on each tick. */

@@ -9,11 +9,18 @@ const BASE = 'http://localhost:5174';
 type ExportDebug = {
   header: 'route-bullets' | 'roundel' | 'metro-placard';
   decorationKinds: string[];
+  brandingText: string;
+  fontStack: string;
   routeBullets: Array<{ lineId: string; bullet: string }>;
   stationSymbols: Array<{ symbol: string; lineCount: number }>;
   segmentAngles: Array<{ lineId: string; allOctilinear: boolean }>;
   allOctilinear: boolean;
   labelCollisions: boolean;
+  parallelSharedSegments: Array<{
+    key: string;
+    lineIds: string[];
+    laneOffsets: Array<{ lineId: string; offset: number }>;
+  }>;
 };
 
 async function waitForMap(page: import('@playwright/test').Page) {
@@ -99,6 +106,42 @@ async function seedDeterministicInterchangeNetwork(page: import('@playwright/tes
     network.addStationToLine(victoria.id, oxford.id);
     network.addStationToLine(victoria.id, greenPark.id);
     network.addStationToLine(victoria.id, brixton.id);
+  });
+
+  await page.waitForTimeout(120);
+}
+
+async function seedSharedTrunkNetwork(page: import('@playwright/test').Page) {
+  await page.evaluate(() => {
+    const network = (window as unknown as {
+      __networkEditor: {
+        network: {
+          addLine: (name: string, color: string) => { id: string };
+          addStation: (lng: number, lat: number, name: string) => { id: string };
+          addStationToLine: (lineId: string, stationId: string) => void;
+        };
+      };
+    }).__networkEditor.network;
+
+    const amber = network.addLine('Amber', '#F59E0B');
+    const teal = network.addLine('Teal', '#00A0E2');
+
+    const west = network.addStation(-0.172, 51.514, 'West');
+    const central = network.addStation(-0.145, 51.514, 'Central');
+    const east = network.addStation(-0.118, 51.514, 'East');
+    const riverside = network.addStation(-0.091, 51.514, 'Riverside');
+    const north = network.addStation(-0.145, 51.536, 'North');
+    const south = network.addStation(-0.118, 51.492, 'South');
+
+    network.addStationToLine(amber.id, west.id);
+    network.addStationToLine(amber.id, central.id);
+    network.addStationToLine(amber.id, east.id);
+    network.addStationToLine(amber.id, riverside.id);
+
+    network.addStationToLine(teal.id, north.id);
+    network.addStationToLine(teal.id, central.id);
+    network.addStationToLine(teal.id, east.id);
+    network.addStationToLine(teal.id, south.id);
   });
 
   await page.waitForTimeout(120);
@@ -414,6 +457,29 @@ test('can select Paris Metro style', async ({ page }) => {
 
   await page.locator('input[name="export-style"][value="paris"]').check();
   await expect(page.locator('input[name="export-style"][value="paris"]')).toBeChecked();
+});
+
+test('unfinished export styles are marked as WIP', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await seedNetwork(page);
+
+  await page.locator('#btn-export').click();
+  await page.locator('#export-btn-next').click();
+
+  const mtaOption = page.locator('.export-style-option').filter({
+    has: page.locator('input[name="export-style"][value="mta"]'),
+  });
+  const luOption = page.locator('.export-style-option').filter({
+    has: page.locator('input[name="export-style"][value="lu"]'),
+  });
+  const parisOption = page.locator('.export-style-option').filter({
+    has: page.locator('input[name="export-style"][value="paris"]'),
+  });
+
+  await expect(mtaOption.locator('.export-style-tag')).toHaveText('WIP');
+  await expect(parisOption.locator('.export-style-tag')).toHaveText('WIP');
+  await expect(luOption.locator('.export-style-tag')).toHaveCount(0);
 });
 
 test('legend checkbox is shown and checked by default', async ({ page }) => {
@@ -752,6 +818,38 @@ test('LU export uses octilinear routing and tube station symbols', async ({ page
   expect(debug.stationSymbols.some((station) => station.symbol === 'tick')).toBe(true);
   expect(debug.stationSymbols.some((station) => station.symbol === 'interchange')).toBe(true);
   expect(debug.labelCollisions).toBe(false);
+
+  await exportPage.close();
+});
+
+test('LU export exposes High Speed Too branding and a Johnston-first font stack', async ({ page, context }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await seedDeterministicInterchangeNetwork(page);
+
+  const exportPage = await openExportPageFor(page, context, 'lu');
+  const debug = await getExportDebug(exportPage);
+
+  expect(debug.brandingText).toBe('HIGH SPEED TOO');
+  expect(debug.fontStack).toContain('Johnston');
+
+  await exportPage.close();
+});
+
+test('LU export offsets shared track segments into parallel lanes', async ({ page, context }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await seedSharedTrunkNetwork(page);
+
+  const exportPage = await openExportPageFor(page, context, 'lu');
+  const debug = await getExportDebug(exportPage);
+  const shared = debug.parallelSharedSegments.find((segment) => segment.lineIds.length === 2);
+
+  expect(shared).toBeTruthy();
+  expect(shared!.laneOffsets).toHaveLength(2);
+  expect(shared!.laneOffsets.every((lane) => Math.abs(lane.offset) > 0.5)).toBe(true);
+  expect(shared!.laneOffsets[0].offset).toBeCloseTo(-shared!.laneOffsets[1].offset, 5);
+  expect(debug.allOctilinear).toBe(true);
 
   await exportPage.close();
 });

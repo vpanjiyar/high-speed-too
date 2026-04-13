@@ -92,6 +92,13 @@
       <div id="overlays-panel">
         <div id="overlays-header">
           <span id="overlays-title">Overlays</span>
+          <div class="overlays-header-actions">
+            <button id="overlays-panel-toggle" class="panel-header-btn" type="button" title="Collapse overlays" aria-expanded="true" aria-label="Collapse overlays panel">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M10 3.5L4.5 7l5.5 3.5"/>
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div class="panel-scroll-region">
@@ -284,7 +291,7 @@
           <svg id="sim-icon-play" width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
             <polygon points="3,1 13,7 3,13"/>
           </svg>
-          <svg id="sim-icon-pause" width="14" height="14" viewBox="0 0 14 14" fill="currentColor" style="display:none">
+          <svg id="sim-icon-pause" class="sim-icon-hidden" width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
             <rect x="2" y="1" width="4" height="12" rx="1"/>
             <rect x="8" y="1" width="4" height="12" rx="1"/>
           </svg>
@@ -326,6 +333,28 @@
           </svg>
           <span>Speed</span>
         </button>
+        <div class="sim-sep"></div>
+        <div id="sim-view-toggle" aria-label="Map view mode">
+          <button id="sim-view-btn-detailed" class="view-btn view-btn--active" type="button" title="Detailed view while simulating">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <rect x="1" y="1" width="6" height="6" rx="1"/>
+              <rect x="9" y="1" width="6" height="6" rx="1"/>
+              <rect x="1" y="9" width="6" height="6" rx="1"/>
+              <rect x="9" y="9" width="6" height="6" rx="1"/>
+            </svg>
+            <span>Detailed</span>
+          </button>
+          <button id="sim-view-btn-schematic" class="view-btn" type="button" title="Schematic view while simulating">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <circle cx="3.5" cy="8" r="2"/>
+              <circle cx="12.5" cy="8" r="2"/>
+              <line x1="5.5" y1="8" x2="10.5" y2="8"/>
+              <circle cx="8" cy="3.5" r="2"/>
+              <line x1="8" y1="5.5" x2="8" y2="6"/>
+            </svg>
+            <span>Schematic</span>
+          </button>
+        </div>
       </div>
 
       <div id="sim-speed-legend" class="hidden" aria-live="polite">
@@ -477,7 +506,7 @@
             <div class="sm-section-label">Platforms</div>
             <div class="sm-platform-row">
               <button id="sm-platform-dec" class="sm-platform-btn">&minus;</button>
-              <input id="sm-platform-count" type="number" min="1" max="20" value="2" class="sm-platform-input" />
+              <input id="sm-platform-count" type="number" min="1" max="20" value="2" class="sm-platform-input" title="Platform count" />
               <button id="sm-platform-inc" class="sm-platform-btn">+</button>
             </div>
           </div>
@@ -644,6 +673,22 @@
         <button class="zoom-link" data-zoom="14"   data-label="Street">Street</button>
       </div>
 
+      <div id="attribution-popover" class="hidden" role="dialog" aria-modal="false" aria-labelledby="attribution-popover-title" aria-hidden="true">
+        <div class="attribution-popover-header">
+          <div>
+            <div id="attribution-popover-title" class="attribution-popover-title">Sources & Thanks</div>
+            <div class="attribution-popover-subtitle">A gloriously over-detailed list of everyone who made this sandbox possible.</div>
+          </div>
+          <button id="attribution-popover-close" class="panel-header-btn attribution-popover-close" type="button" title="Close sources and thanks" aria-label="Close sources and thanks">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <path d="M2 2l10 10M12 2L2 12"/>
+            </svg>
+          </button>
+        </div>
+        <p class="attribution-popover-copy">This cheerful little rail sandbox is standing on the shoulders of public data stewards, open-source map obsessives, and a frankly heroic number of contributors. Here is the proper roll call.</p>
+        <div id="attribution-popover-list" class="attribution-popover-list"></div>
+      </div>
+
       <div id="speed-hover-tooltip" class="hidden" aria-live="polite"></div>
     </div>
 
@@ -659,6 +704,17 @@
           <button id="import-btn-replace" class="modal-btn modal-btn--danger">Replace all</button>
           <button id="import-btn-merge" class="modal-btn modal-btn--primary">Add on top</button>
           <button id="import-btn-cancel" class="modal-btn modal-btn--secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="clear-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="clear-modal-title">
+      <div class="modal-box clear-modal-box">
+        <div class="modal-title" id="clear-modal-title">Clear the current network?</div>
+        <p class="modal-text">This removes every drawn line, station, and active selection from the current plan. It is useful when you mean it and catastrophic when you do not.</p>
+        <div class="modal-actions">
+          <button id="clear-btn-confirm" class="modal-btn modal-btn--danger">Clear everything</button>
+          <button id="clear-btn-cancel" class="modal-btn modal-btn--secondary">Keep working</button>
         </div>
       </div>
     </div>
@@ -834,7 +890,10 @@
                 <label class="export-style-option">
                   <input type="radio" name="export-style" value="mta" checked />
                   <div class="export-style-card">
-                    <div class="export-style-name">NY Metro (MTA)</div>
+                    <div class="export-style-heading">
+                      <div class="export-style-name">NY Metro (MTA)</div>
+                      <span class="export-style-tag">WIP</span>
+                    </div>
                     <div class="export-style-desc">Bullet-route header, bolder park and water blocks, and a denser trunk-style schematic.</div>
                   </div>
                 </label>
@@ -848,7 +907,10 @@
                 <label class="export-style-option">
                   <input type="radio" name="export-style" value="paris" />
                   <div class="export-style-card">
-                    <div class="export-style-name">Paris Metro</div>
+                    <div class="export-style-heading">
+                      <div class="export-style-name">Paris Metro</div>
+                      <span class="export-style-tag">WIP</span>
+                    </div>
                     <div class="export-style-desc">Compact spacing, Metro placard header, and a denser Paris-inspired visual language.</div>
                   </div>
                 </label>

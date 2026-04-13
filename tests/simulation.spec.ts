@@ -69,6 +69,32 @@ test('sim clock renders HH:MM:SS and speed buttons are present', async ({ page }
   expect(speedCount).toBeGreaterThanOrEqual(4);
 });
 
+test('simulate view exposes the detailed/schematic toggle and keeps it interactive', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await enterSimMode(page);
+
+  await expect(page.locator('#sim-view-toggle')).toBeVisible();
+  await page.locator('#sim-view-btn-schematic').click();
+  await expect(page.locator('#sim-view-btn-schematic')).toHaveClass(/view-btn--active/);
+  await expect(page.locator('#view-btn-schematic')).toHaveClass(/view-btn--active/);
+
+  await page.locator('#sim-view-btn-detailed').click();
+  await expect(page.locator('#sim-view-btn-detailed')).toHaveClass(/view-btn--active/);
+  await expect(page.locator('#view-btn-detailed')).toHaveClass(/view-btn--active/);
+});
+
+test('mobile simulate layout keeps the toolbar, HUD, and sim view toggle visible', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(BASE);
+  await waitForMap(page);
+  await enterSimMode(page);
+
+  await expect(page.locator('#sim-toolbar')).toBeVisible();
+  await expect(page.locator('#sim-hud')).toBeVisible();
+  await expect(page.locator('#sim-view-toggle')).toBeVisible();
+});
+
 test('HUD exposes key stat fields in sim mode', async ({ page }) => {
   await page.goto(BASE);
   await waitForMap(page);
@@ -88,4 +114,6 @@ test('timetable modal opens and closes from sim toolbar', async ({ page }) => {
   await expect(page.locator('#sim-btn-timetable')).toBeVisible();
   await page.locator('#sim-btn-timetable').click();
   await expect(page.locator('#timetable-modal')).toBeVisible();
+  await page.locator('#timetable-close').click();
+  await expect(page.locator('#timetable-modal')).toBeHidden();
 });

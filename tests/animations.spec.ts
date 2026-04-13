@@ -255,6 +255,74 @@ test('line manager and train picker modal animate in and out', async ({ page }) 
   await expect(page.locator('#line-manager')).toBeHidden();
 });
 
+test('clear confirmation modal animates and preserves the network on cancel', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+  await seedLine(page, 'Clear Modal Test');
+
+  await page.locator('#tool-clear').click();
+  await waitForMotion(page, '#clear-modal', 'entering');
+  await expect(page.locator('#clear-modal')).toBeVisible();
+
+  await page.locator('#clear-btn-cancel').click();
+  await waitForMotion(page, '#clear-modal', 'exiting');
+  await expect(page.locator('#clear-modal')).toBeHidden();
+
+  const lineCount = await page.evaluate(() => {
+    const editor = (window as unknown as { __networkEditor: { network: { lines: unknown[] } } }).__networkEditor;
+    return editor.network.lines.length;
+  });
+  expect(lineCount).toBeGreaterThan(0);
+});
+
+test('credits popup animates from the nav controls and lists sources', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('.ctrl-attribution-trigger').click();
+  await waitForMotion(page, '#attribution-popover', 'entering');
+  await expect(page.locator('#attribution-popover')).toBeVisible();
+
+  const sourceCount = await page.locator('#attribution-popover-list .attribution-source-card').count();
+  expect(sourceCount).toBeGreaterThanOrEqual(6);
+
+  await page.locator('#attribution-popover-close').click();
+  await waitForMotion(page, '#attribution-popover', 'exiting');
+  await expect(page.locator('#attribution-popover')).toBeHidden();
+});
+
+test('overlays panel can collapse to a clean compact chip and expand again', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  const panel = page.locator('#overlays-panel');
+  const before = await panel.boundingBox();
+  expect(before).not.toBeNull();
+
+  await page.locator('#overlays-panel-toggle').click();
+  await expect(panel).toHaveClass(/overlays-panel--collapsed/);
+
+  const afterCollapse = await panel.boundingBox();
+  expect(afterCollapse).not.toBeNull();
+  expect(afterCollapse!.width).toBeLessThan(before!.width / 2);
+
+  await page.locator('#overlays-panel-toggle').click();
+  await expect(panel).not.toHaveClass(/overlays-panel--collapsed/);
+});
+
+test('sim toolbar and HUD animate when entering and leaving simulate mode', async ({ page }) => {
+  await page.goto(BASE);
+  await waitForMap(page);
+
+  await page.locator('#mode-btn-sim').click();
+  await waitForMotion(page, '#sim-toolbar', 'entering');
+  await waitForMotion(page, '#sim-hud', 'entering');
+
+  await page.locator('#mode-btn-plan').click();
+  await waitForMotion(page, '#sim-toolbar', 'exiting');
+  await waitForMotion(page, '#sim-hud', 'exiting');
+});
+
 test('line manager stays free of horizontal overflow', async ({ page }) => {
   await page.goto(BASE);
   await waitForMap(page);

@@ -23,6 +23,10 @@ type StationSymbol = 'dot' | 'tick' | 'interchange' | 'terminal';
 const EXPORT_CANVAS_WIDTH = 1400;
 const EXPORT_CANVAS_HEIGHT = 900;
 
+const LU_FONT_STACK = '"TfL Johnston", "New Johnston", "Johnston100", "Johnston ITC", "Gill Sans", "Segoe UI", sans-serif';
+const MTA_FONT_STACK = '"Helvetica Neue", Helvetica, Arial, sans-serif';
+const PARIS_FONT_STACK = '"Trebuchet MS", Arial, sans-serif';
+
 interface Point {
   x: number;
   y: number;
@@ -101,6 +105,7 @@ interface ExportTheme {
   park: string;
   roundelBlue?: string;
   roundelRed?: string;
+  uiFontFamily: string;
   titleFont: string;
   subtitleFont: string;
   labelFont: string;
@@ -131,10 +136,26 @@ interface SegmentDebug {
   allOctilinear: boolean;
 }
 
+interface ParallelSharedSegmentDebug {
+  key: string;
+  lineIds: string[];
+  laneOffsets: Array<{ lineId: string; offset: number }>;
+}
+
+interface SharedTrackGroup {
+  key: string;
+  startId: string;
+  endId: string;
+  lineIds: string[];
+  laneOffsets: Map<string, number>;
+}
+
 interface ExportDebug {
   style: ExportStyle;
   header: ExportHeader;
   decorationKinds: string[];
+  brandingText: string;
+  fontStack: string;
   routeBullets: Array<{ lineId: string; bullet: string }>;
   stationSymbols: Array<{
     id: string;
@@ -146,6 +167,7 @@ interface ExportDebug {
   segmentAngles: SegmentDebug[];
   allOctilinear: boolean;
   labelCollisions: boolean;
+  parallelSharedSegments: ParallelSharedSegmentDebug[];
 }
 
 interface ExportDocument {
@@ -154,6 +176,7 @@ interface ExportDocument {
   height: number;
   title: string;
   subtitle: string;
+  brandingText: string;
   showLegend: boolean;
   contentRect: Rect;
   lines: LayoutLine[];
@@ -305,7 +328,8 @@ function buildExportDocument(
   const { stations, neighbors } = buildStationRegistry(lines);
   const projected = projectStations(stations, contentRect);
   const positioned = relaxStationPositions(stations, neighbors, projected, contentRect, tuning);
-  const layoutLines = lines.map((line) => buildLayoutLine(line, positioned, tuning));
+  const sharedTracks = buildSharedTrackRegistry(lines, theme, options.style);
+  const layoutLines = lines.map((line) => buildLayoutLine(line, positioned, tuning, sharedTracks));
   const lineLookup = new Map(lines.map((line) => [line.id, line]));
   const layoutStations = stations.map((station) =>
     buildLayoutStation(station, lineLookup, positioned, options.style),
@@ -313,6 +337,7 @@ function buildExportDocument(
   const labels = placeLabels(layoutStations, layoutLines, contentRect, options.style, tuning);
 
   const { title, subtitle } = getStyleTitles(options.style);
+  const brandingText = getBrandingText(options.style);
 
   return {
     style: options.style,
@@ -320,21 +345,22 @@ function buildExportDocument(
     height,
     title,
     subtitle,
+    brandingText,
     showLegend: options.showLegend,
     contentRect,
     lines: layoutLines,
     stations: layoutStations,
     labels,
     theme,
-    debug: buildDebug(options.style, layoutLines, layoutStations, labels),
+    debug: buildDebug(options.style, layoutLines, layoutStations, labels, theme, brandingText, sharedTracks),
   };
 }
 
 function getStyleTitles(style: ExportStyle): { title: string; subtitle: string } {
   if (style === 'lu') {
     return {
-      title: 'Underground Diagram',
-      subtitle: 'London-inspired octolinear export',
+      title: 'Tube map',
+      subtitle: 'High Speed Too network',
     };
   }
 
@@ -349,6 +375,10 @@ function getStyleTitles(style: ExportStyle): { title: string; subtitle: string }
     title: 'Subway Diagram',
     subtitle: 'New York-inspired schematic export',
   };
+}
+
+function getBrandingText(style: ExportStyle): string {
+  return style === 'lu' ? 'HIGH SPEED TOO' : '';
 }
 
 function buildTheme(style: ExportStyle, lineCount: number): ExportTheme {
@@ -377,10 +407,11 @@ function buildTheme(style: ExportStyle, lineCount: number): ExportTheme {
       park: '#E8F4E2',
       roundelBlue: '#0019A8',
       roundelRed: '#DC241F',
-      titleFont: '700 30px "Trebuchet MS", Arial, sans-serif',
-      subtitleFont: '500 14px "Trebuchet MS", Arial, sans-serif',
-      labelFont: '14px "Trebuchet MS", Arial, sans-serif',
-      legendFont: '13px "Trebuchet MS", Arial, sans-serif',
+      uiFontFamily: LU_FONT_STACK,
+      titleFont: `700 31px ${LU_FONT_STACK}`,
+      subtitleFont: `500 14px ${LU_FONT_STACK}`,
+      labelFont: `14px ${LU_FONT_STACK}`,
+      legendFont: `13px ${LU_FONT_STACK}`,
       routeWidth: Math.max(7.5, 10.5 - Math.max(0, lineCount - 4) * 0.55),
       routeCasingWidth: Math.max(3.5, 4.8 - Math.max(0, lineCount - 4) * 0.2),
       routeCornerRadius: 16,
@@ -410,10 +441,11 @@ function buildTheme(style: ExportStyle, lineCount: number): ExportTheme {
       water: '#BFDCEA',
       waterAccent: '#DDEEF5',
       park: '#E4E7D8',
-      titleFont: '700 29px "Trebuchet MS", Arial, sans-serif',
-      subtitleFont: '500 14px "Trebuchet MS", Arial, sans-serif',
-      labelFont: '14px "Trebuchet MS", Arial, sans-serif',
-      legendFont: '13px "Trebuchet MS", Arial, sans-serif',
+      uiFontFamily: PARIS_FONT_STACK,
+      titleFont: `700 29px ${PARIS_FONT_STACK}`,
+      subtitleFont: `500 14px ${PARIS_FONT_STACK}`,
+      labelFont: `14px ${PARIS_FONT_STACK}`,
+      legendFont: `13px ${PARIS_FONT_STACK}`,
       routeWidth: Math.max(7.5, 10.8 - Math.max(0, lineCount - 4) * 0.48),
       routeCasingWidth: Math.max(3.2, 4.4 - Math.max(0, lineCount - 4) * 0.16),
       routeCornerRadius: 14,
@@ -442,10 +474,11 @@ function buildTheme(style: ExportStyle, lineCount: number): ExportTheme {
     water: '#BFD0E1',
     waterAccent: '#DCE7F1',
     park: '#D8DFC5',
-    titleFont: '700 30px "Helvetica Neue", Helvetica, Arial, sans-serif',
-    subtitleFont: '500 14px "Helvetica Neue", Helvetica, Arial, sans-serif',
-    labelFont: '14px "Helvetica Neue", Helvetica, Arial, sans-serif',
-    legendFont: '13px "Helvetica Neue", Helvetica, Arial, sans-serif',
+    uiFontFamily: MTA_FONT_STACK,
+    titleFont: `700 30px ${MTA_FONT_STACK}`,
+    subtitleFont: `500 14px ${MTA_FONT_STACK}`,
+    labelFont: `14px ${MTA_FONT_STACK}`,
+    legendFont: `13px ${MTA_FONT_STACK}`,
     routeWidth: Math.max(8.5, 12 - Math.max(0, lineCount - 4) * 0.65),
     routeCasingWidth: Math.max(4, 5.5 - Math.max(0, lineCount - 4) * 0.25),
     routeCornerRadius: 18,
@@ -796,10 +829,144 @@ function clampPointToRect(point: Point, rect: Rect, inset: number): void {
   point.y = clamp(point.y, rect.y + inset, rect.y + rect.height - inset);
 }
 
+function buildSharedTrackRegistry(
+  lines: ExportLine[],
+  theme: ExportTheme,
+  style: ExportStyle,
+): Map<string, SharedTrackGroup> {
+  const lineOrder = new Map(lines.map((line, index) => [line.id, index]));
+  const groups = new Map<string, { startId: string; endId: string; lineIds: Set<string> }>();
+  const laneGap =
+    style === 'lu'
+      ? Math.max(8, theme.routeWidth * 0.95)
+      : style === 'paris'
+        ? Math.max(6, theme.routeWidth * 0.8)
+        : Math.max(6.5, theme.routeWidth * 0.78);
+
+  for (const line of lines) {
+    for (let index = 0; index < line.stations.length - 1; index++) {
+      const start = line.stations[index];
+      const end = line.stations[index + 1];
+      const key = canonicalSegmentKey(start.id, end.id);
+      const group = groups.get(key);
+
+      if (group) {
+        group.lineIds.add(line.id);
+      } else {
+        groups.set(key, {
+          startId: start.id,
+          endId: end.id,
+          lineIds: new Set([line.id]),
+        });
+      }
+    }
+  }
+
+  const registry = new Map<string, SharedTrackGroup>();
+
+  for (const [key, group] of groups) {
+    if (group.lineIds.size < 2) continue;
+
+    const orderedLineIds = Array.from(group.lineIds).sort(
+      (a, b) => (lineOrder.get(a) ?? 0) - (lineOrder.get(b) ?? 0),
+    );
+    const midpoint = (orderedLineIds.length - 1) / 2;
+    const laneOffsets = new Map<string, number>();
+
+    orderedLineIds.forEach((lineId, index) => {
+      laneOffsets.set(lineId, (index - midpoint) * laneGap);
+    });
+
+    registry.set(key, {
+      key,
+      startId: group.startId,
+      endId: group.endId,
+      lineIds: orderedLineIds,
+      laneOffsets,
+    });
+  }
+
+  return registry;
+}
+
+function canonicalSegmentKey(a: string, b: string): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+function getSharedTrackOffset(
+  sharedTracks: Map<string, SharedTrackGroup>,
+  lineId: string,
+  startId: string,
+  endId: string,
+): number {
+  const group = sharedTracks.get(canonicalSegmentKey(startId, endId));
+  if (!group) return 0;
+
+  const laneOffset = group.laneOffsets.get(lineId) ?? 0;
+  if (Math.abs(laneOffset) < 0.01) return 0;
+
+  return group.startId === startId && group.endId === endId ? laneOffset : -laneOffset;
+}
+
+function offsetPolyline(points: Point[], offset: number): Point[] {
+  if (Math.abs(offset) < 0.01 || points.length < 2) {
+    return points.map((point) => ({ ...point }));
+  }
+
+  const segments = points.slice(1).map((point, index) => {
+    const start = points[index];
+    const normal = computeUnitNormal(start, point);
+
+    return {
+      a: { x: start.x + normal.x * offset, y: start.y + normal.y * offset },
+      b: { x: point.x + normal.x * offset, y: point.y + normal.y * offset },
+    };
+  });
+
+  if (segments.length === 1) {
+    return [segments[0].a, segments[0].b];
+  }
+
+  const result: Point[] = [{ ...segments[0].a }];
+
+  for (let index = 1; index < segments.length; index++) {
+    const prev = segments[index - 1];
+    const next = segments[index];
+    const intersection = intersectInfiniteLines(prev.a, prev.b, next.a, next.b);
+    result.push(intersection ?? { ...next.a });
+  }
+
+  result.push({ ...segments[segments.length - 1].b });
+  return dedupeSegmentPoints(result);
+}
+
+function computeUnitNormal(a: Point, b: Point): Point {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const length = Math.hypot(dx, dy);
+
+  if (length < 0.001) return { x: 0, y: 0 };
+  return { x: -dy / length, y: dx / length };
+}
+
+function intersectInfiniteLines(a1: Point, a2: Point, b1: Point, b2: Point): Point | null {
+  const denominator = (a1.x - a2.x) * (b1.y - b2.y) - (a1.y - a2.y) * (b1.x - b2.x);
+  if (Math.abs(denominator) < 0.0001) return null;
+
+  const detA = a1.x * a2.y - a1.y * a2.x;
+  const detB = b1.x * b2.y - b1.y * b2.x;
+
+  return {
+    x: (detA * (b1.x - b2.x) - (a1.x - a2.x) * detB) / denominator,
+    y: (detA * (b1.y - b2.y) - (a1.y - a2.y) * detB) / denominator,
+  };
+}
+
 function buildLayoutLine(
   line: ExportLine,
   positioned: Map<string, Point>,
   tuning: LayoutTuning,
+  sharedTracks: Map<string, SharedTrackGroup>,
 ): LayoutLine {
   const points: Point[] = [];
 
@@ -813,7 +980,13 @@ function buildLayoutLine(
     const end = positioned.get(line.stations[index + 1].id);
     if (!start || !end) continue;
 
-    const segment = buildOctilinearSegment(start, end, tuning);
+    const offset = getSharedTrackOffset(
+      sharedTracks,
+      line.id,
+      line.stations[index].id,
+      line.stations[index + 1].id,
+    );
+    const segment = offsetPolyline(buildOctilinearSegment(start, end, tuning), offset);
     for (let segmentIndex = 0; segmentIndex < segment.length; segmentIndex++) {
       const point = segment[segmentIndex];
       const isDuplicate = points.length > 0 && pointsAlmostEqual(points[points.length - 1], point);
@@ -1232,6 +1405,9 @@ function buildDebug(
   lines: LayoutLine[],
   stations: LayoutStation[],
   labels: LayoutLabel[],
+  theme: ExportTheme,
+  brandingText: string,
+  sharedTracks: Map<string, SharedTrackGroup>,
 ): ExportDebug {
   const segmentAngles = lines.map((line) => {
     const angles: number[] = [];
@@ -1254,10 +1430,12 @@ function buildDebug(
     header: style === 'lu' ? 'roundel' : style === 'paris' ? 'metro-placard' : 'route-bullets',
     decorationKinds:
       style === 'lu'
-        ? ['roundel', 'river-band']
+        ? ['roundel', 'river-band', 'grid', 'zone-bands']
         : style === 'paris'
           ? ['metro-placard', 'water-band', 'park-block']
           : ['route-bullets', 'water-band', 'park-block'],
+    brandingText,
+    fontStack: theme.uiFontFamily,
     routeBullets: lines.map((line) => ({ lineId: line.id, bullet: line.routeBullet })),
     stationSymbols: stations.map((station) => ({
       id: station.id,
@@ -1269,6 +1447,14 @@ function buildDebug(
     segmentAngles,
     allOctilinear: segmentAngles.every((segment) => segment.allOctilinear),
     labelCollisions: hasLabelCollisions(labels),
+    parallelSharedSegments: Array.from(sharedTracks.values()).map((group) => ({
+      key: group.key,
+      lineIds: group.lineIds,
+      laneOffsets: group.lineIds.map((lineId) => ({
+        lineId,
+        offset: group.laneOffsets.get(lineId) ?? 0,
+      })),
+    })),
   };
 }
 
@@ -1341,7 +1527,7 @@ function buildExportHTML(doc: ExportDocument, options: BuildHtmlOptions = {}): s
       radial-gradient(circle at 80% 0%, rgba(255,255,255,0.05), transparent 28%),
       var(--page-bg);
     color: #fff;
-    font-family: system-ui, "Segoe UI", sans-serif;
+    font-family: ${doc.theme.uiFontFamily};
     overflow: hidden;
   }
 
@@ -1496,7 +1682,7 @@ function buildExportHTML(doc: ExportDocument, options: BuildHtmlOptions = {}): s
     ctx.fillStyle = line.color;
     ctx.fill();
     ctx.fillStyle = line.bulletTextColor;
-    ctx.font = '700 ' + (radius + 4) + 'px ' + (DOC.style === 'mta' ? '"Helvetica Neue", Helvetica, Arial, sans-serif' : '"Trebuchet MS", Arial, sans-serif');
+    ctx.font = '700 ' + (radius + 4) + 'px ' + THEME.uiFontFamily;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(line.routeBullet, x, y + 0.5);
@@ -1505,7 +1691,7 @@ function buildExportHTML(doc: ExportDocument, options: BuildHtmlOptions = {}): s
   function drawMetroPill(x, y, width, height, text) {
     drawRoundedRect(x, y, width, height, height / 2, '#163B75', null, 0);
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = '700 18px "Trebuchet MS", Arial, sans-serif';
+    ctx.font = '700 18px ' + THEME.uiFontFamily;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(text, x + width / 2, y + height / 2 + 0.5);
@@ -1524,26 +1710,88 @@ function buildExportHTML(doc: ExportDocument, options: BuildHtmlOptions = {}): s
     }
   }
 
+  function renderLUGrid() {
+    var rect = DOC.contentRect;
+    var gridSize = 110;
+    var cols = Math.max(3, Math.floor(rect.width / gridSize));
+    var rows = Math.max(3, Math.floor(rect.height / gridSize));
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(rect.x, rect.y, rect.width, rect.height);
+    ctx.clip();
+
+    ctx.fillStyle = hexToRgba('#6B7487', 0.12);
+    for (var band = -2; band < 8; band++) {
+      var startX = rect.x + band * gridSize * 1.45;
+      ctx.beginPath();
+      ctx.moveTo(startX, rect.y + rect.height);
+      ctx.lineTo(startX + gridSize * 0.82, rect.y + rect.height);
+      ctx.lineTo(startX + gridSize * 2.65, rect.y);
+      ctx.lineTo(startX + gridSize * 1.83, rect.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.strokeStyle = hexToRgba(THEME.roundelBlue || '#0019A8', 0.2);
+    ctx.lineWidth = 1;
+
+    for (var x = rect.x; x <= rect.x + rect.width + 0.1; x += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(x, rect.y);
+      ctx.lineTo(x, rect.y + rect.height);
+      ctx.stroke();
+    }
+
+    for (var y = rect.y; y <= rect.y + rect.height + 0.1; y += gridSize) {
+      ctx.beginPath();
+      ctx.moveTo(rect.x, y);
+      ctx.lineTo(rect.x + rect.width, y);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = hexToRgba(THEME.stationOutline, 0.13);
+    ctx.font = '700 52px ' + THEME.uiFontFamily;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    for (var row = 0; row < rows; row++) {
+      for (var col = 0; col < cols; col++) {
+        var cx = rect.x + gridSize / 2 + col * gridSize;
+        var cy = rect.y + gridSize / 2 + row * gridSize;
+        var zone = 1 + Math.min(
+          8,
+          Math.round(Math.max(Math.abs(col - (cols - 1) / 2), Math.abs(row - (rows - 1) / 2)))
+        );
+        ctx.fillText(String(zone), cx, cy);
+      }
+    }
+
+    ctx.restore();
+  }
+
   function renderLUBackdrop() {
     var barX = 60;
-    var barY = 67;
-    var barW = 138;
-    var barH = 20;
-    var centerX = 129;
+    var barY = 62;
+    var barW = 180;
+    var barH = 30;
+    var centerX = 150;
     var centerY = 77;
+
+    renderLUGrid();
 
     ctx.lineWidth = 12;
     ctx.strokeStyle = THEME.roundelRed;
     ctx.beginPath();
-    ctx.arc(centerX, centerY, 28, 0, Math.PI * 2);
+    ctx.arc(centerX, centerY, 36, 0, Math.PI * 2);
     ctx.stroke();
 
     drawRoundedRect(barX, barY, barW, barH, 10, THEME.roundelBlue, null, 0);
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = '700 11px "Trebuchet MS", Arial, sans-serif';
+    ctx.font = '700 12px ' + THEME.uiFontFamily;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('UNDERGROUND', centerX, centerY + 0.5);
+    ctx.fillText(DOC.brandingText || 'HIGH SPEED TOO', centerX, centerY + 0.5);
 
     ctx.strokeStyle = hexToRgba(THEME.water, 0.8);
     ctx.lineWidth = 22;
@@ -1699,10 +1947,10 @@ function buildExportHTML(doc: ExportDocument, options: BuildHtmlOptions = {}): s
     ctx.font = THEME.titleFont;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText(DOC.title, 234, 82);
+    ctx.fillText(DOC.title, 278, 82);
     ctx.fillStyle = THEME.subtitleColor;
     ctx.font = THEME.subtitleFont;
-    ctx.fillText(DOC.subtitle, 234, 106);
+    ctx.fillText(DOC.subtitle, 278, 106);
   }
 
   function renderRoutes() {
@@ -1871,10 +2119,10 @@ function buildExportHTML(doc: ExportDocument, options: BuildHtmlOptions = {}): s
     );
 
     ctx.fillStyle = THEME.legendTitle;
-    ctx.font = '700 15px ' + (DOC.style === 'mta' ? '"Helvetica Neue", Helvetica, Arial, sans-serif' : '"Trebuchet MS", Arial, sans-serif');
+    ctx.font = '700 15px ' + THEME.uiFontFamily;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    ctx.fillText(DOC.style === 'mta' ? 'Services' : 'Lines', legendX + 18, legendY + 28);
+    ctx.fillText(DOC.style === 'mta' ? 'Services' : DOC.style === 'lu' ? 'Key to lines' : 'Lines', legendX + 18, legendY + 28);
 
     for (var i = 0; i < DOC.lines.length; i++) {
       var line = DOC.lines[i];
@@ -1891,7 +2139,7 @@ function buildExportHTML(doc: ExportDocument, options: BuildHtmlOptions = {}): s
       } else if (DOC.style === 'paris') {
         drawRoundedRect(legendX + 18, rowY - 10, 38, 18, 9, line.color, null, 0);
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = '700 10px "Trebuchet MS", Arial, sans-serif';
+        ctx.font = '700 10px ' + THEME.uiFontFamily;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(line.routeBullet, legendX + 37, rowY - 0.5);
@@ -1908,7 +2156,7 @@ function buildExportHTML(doc: ExportDocument, options: BuildHtmlOptions = {}): s
 
     var symbolsY = legendY + 58 + DOC.lines.length * rowHeight;
     ctx.fillStyle = THEME.legendTitle;
-    ctx.font = '700 12px ' + (DOC.style === 'mta' ? '"Helvetica Neue", Helvetica, Arial, sans-serif' : '"Trebuchet MS", Arial, sans-serif');
+    ctx.font = '700 12px ' + THEME.uiFontFamily;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     ctx.fillText('Symbols', legendX + 18, symbolsY);
@@ -1934,7 +2182,7 @@ function buildExportHTML(doc: ExportDocument, options: BuildHtmlOptions = {}): s
 
   function renderFooter() {
     ctx.fillStyle = THEME.subtitleColor;
-    ctx.font = '12px ' + (DOC.style === 'mta' ? '"Helvetica Neue", Helvetica, Arial, sans-serif' : '"Trebuchet MS", Arial, sans-serif');
+    ctx.font = '12px ' + THEME.uiFontFamily;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     ctx.fillText('Generated by High Speed Too', 88, DOC.height - 34);
