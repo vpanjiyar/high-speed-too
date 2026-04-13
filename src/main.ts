@@ -307,6 +307,31 @@ function setAnimatedVisibility(
   element.style.pointerEvents = 'none';
 
   const motion = getVisibilityMotion(options.preset, visible);
+  // Preserve horizontal centering for elements that use `left:50%` + `translateX(-50%)`
+  // (notably the simulation toolbar) by injecting the centering translate into
+  // the animation keyframes so the element doesn't visually snap from the
+  // left/right during the animation.
+  if (element.id === 'sim-toolbar') {
+    const addCenter = (kfs: Keyframe[] | undefined) => {
+      if (!kfs) return kfs;
+      return kfs.map((kf) => {
+        const copy: Keyframe = { ...kf };
+        if (typeof copy.transform === 'string') {
+          copy.transform = `translateX(-50%) ${copy.transform}`;
+        } else {
+          copy.transform = 'translateX(-50%)';
+        }
+        return copy;
+      });
+    };
+
+    const centeredRoot = addCenter(motion.root);
+    if (centeredRoot) motion.root = centeredRoot;
+    if (motion.surface) {
+      const centeredSurface = addCenter(motion.surface);
+      if (centeredSurface) motion.surface = centeredSurface;
+    }
+  }
   const animations: Animation[] = [
     element.animate(motion.root, {
       duration: motion.duration,
@@ -1170,6 +1195,7 @@ map.on('load', () => {
   };
 
   overlaysPanelToggleBtn.addEventListener('click', () => {
+    if (simMode) return; // ignore toggle while in simulate mode
     applyOverlaysCollapsed(!overlaysCollapsed);
   });
 
@@ -3249,6 +3275,23 @@ map.on('load', () => {
     return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   }
 
+  function hideElementImmediately(element: HTMLElement, strategy: VisibilityStrategy = 'class'): void {
+    const activeMotion = activeVisibilityMotions.get(element);
+    if (activeMotion) {
+      activeMotion.animations.forEach((a) => a.cancel());
+      activeVisibilityMotions.delete(element);
+    }
+
+    if (strategy === 'class') {
+      element.classList.add('hidden');
+    } else {
+      element.style.display = 'none';
+    }
+    element.dataset.motionState = 'closed';
+    element.setAttribute('aria-hidden', 'true');
+    element.style.pointerEvents = '';
+  }
+
   async function setSimMode(active: boolean): Promise<void> {
     simMode = active;
     simUiModeActive = active;
@@ -3263,6 +3306,17 @@ map.on('load', () => {
 
       // Allow the class to take effect and flush layout before animating
       await afterNextPaint();
+
+      // Immediately hide overlays panel so it never appears in the sim UI
+      hideElementImmediately(overlaysPanelEl);
+      // Disable the toggle so the user cannot expand overlays while simulating
+      try {
+        overlaysPanelToggleBtn.disabled = true;
+        overlaysPanelToggleBtn.setAttribute('aria-hidden', 'true');
+        overlaysPanelToggleBtn.style.visibility = 'hidden';
+      } catch {
+        // ignore if toggle button missing
+      }
 
       // Start entrance animations (don't await here — let them run)
       void showAnimatedClass(simToolbar, 'panel');
@@ -3325,7 +3379,18 @@ map.on('load', () => {
       speedHoverTooltipEl?.classList.add('hidden');
       syncSimSpeedKeyUi();
 
+      // Remove sim-mode first so plan UI is visible, then animate overlays in
       document.body.classList.remove('sim-mode');
+      // allow paint then show overlays with animation and re-enable toggle
+      await afterNextPaint();
+      try {
+        overlaysPanelToggleBtn.disabled = false;
+        overlaysPanelToggleBtn.removeAttribute('aria-hidden');
+        overlaysPanelToggleBtn.style.visibility = '';
+      } catch {
+        // ignore if toggle button missing
+      }
+      void showAnimatedClass(overlaysPanelEl, 'panel');
     }
   }
 

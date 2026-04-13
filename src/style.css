@@ -1289,7 +1289,8 @@ body.panel-resizing * {
   transition: width var(--ui-panel) var(--ui-spring), height var(--ui-panel) var(--ui-spring), box-shadow var(--ui-fast);
 }
 
-.panel.hidden {
+.panel.hidden,
+#overlays-panel.hidden {
   display: none;
 }
 
@@ -4549,7 +4550,8 @@ body.sim-mode .panel-header-btn:focus-visible {
 /* Hide plan-only or sim-only elements based on mode */
 body.sim-mode #network-toolbar { display: none !important; }
 body.sim-mode #line-panel { display: none !important; }
-body.sim-mode #overlays-panel { display: none !important; }
+/* Overlays panel is animated in/out instead of being forcibly hidden here */
+/* body.sim-mode #overlays-panel { display: none !important; } */
 body.sim-mode #station-manager { display: none !important; }
 body.sim-mode #line-manager { display: none !important; }
 body.sim-mode #view-toggle { display: none !important; }
